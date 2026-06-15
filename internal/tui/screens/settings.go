@@ -1,0 +1,170 @@
+package screens
+
+import (
+	"fmt"
+	"runtime"
+	"strconv"
+	"strings"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/noisethanks/stalker-tex/internal/config"
+	"github.com/noisethanks/stalker-tex/internal/tui/style"
+)
+
+type settingsField int
+
+const (
+	fieldModsDir settingsField = iota
+	fieldBackupDir
+	fieldWorkers
+	fieldInPlace
+	fieldStagingDir
+	fieldCount
+)
+
+// SettingsModel handles configuring user preferences.
+type SettingsModel struct {
+	cfg       *config.Config
+	inputs    [3]textinput.Model // mods, backup, workers
+	inPlace   bool
+	focused   settingsField
+	errMsg    string
+	width     int
+	height    int
+}
+
+func NewSettings(cfg *config.Config) SettingsModel {
+	mods := textinput.New()
+	mods.SetValue(cfg.ModsDir)
+	mods.Width = 60
+	mods.Focus()
+
+	backup := textinput.New()
+	backup.SetValue(cfg.BackupDir)
+	backup.Width = 60
+
+	workers := textinput.New()
+	workers.SetValue(strconv.Itoa(cfg.WorkerCount))
+	workers.Width = 6
+
+	return SettingsModel{
+		cfg:     cfg,
+		inputs:  [3]textinput.Model{mods, backup, workers},
+		inPlace: cfg.CompressInPlace,
+		focused: fieldModsDir,
+	}
+}
+
+func (m SettingsModel) Init() tea.Cmd { return textinput.Blink }
+
+func (m SettingsModel) Update(msg tea.Msg) (SettingsModel, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "tab", "down":
+			m.focused = (m.focused + 1) % fieldCount
+			m.refocus()
+		case "shift+tab", "up":
+			m.focused = (m.focused + fieldCount - 1) % fieldCount
+			m.refocus()
+		case " ":
+			if m.focused == fieldInPlace {
+				m.inPlace = !m.inPlace
+			}
+		case "enter":
+			return m.save()
+		case "esc", "q":
+			return m, func() tea.Msg { return NavigateMsg{To: NavMenu} }
+		}
+	}
+
+	var cmd tea.Cmd
+	switch m.focused {
+	case fieldModsDir:
+		m.inputs[0], cmd = m.inputs[0].Update(msg)
+	case fieldBackupDir:
+		m.inputs[1], cmd = m.inputs[1].Update(msg)
+	case fieldWorkers:
+		m.inputs[2], cmd = m.inputs[2].Update(msg)
+	}
+	return m, cmd
+}
+
+func (m *SettingsModel) refocus() {
+	for i := range m.inputs {
+		m.inputs[i].Blur()
+	}
+	switch m.focused {
+	case fieldModsDir:
+		m.inputs[0].Focus()
+	case fieldBackupDir:
+		m.inputs[1].Focus()
+	case fieldWorkers:
+		m.inputs[2].Focus()
+	}
+}
+
+func (m SettingsModel) save() (SettingsModel, tea.Cmd) {
+	workers, err := strconv.Atoi(strings.TrimSpace(m.inputs[2].Value()))
+	if err != nil || workers < 1 {
+		workers = max(1, runtime.NumCPU()/2)
+	}
+	updated := *m.cfg
+	updated.ModsDir = strings.TrimSpace(m.inputs[0].Value())
+	updated.BackupDir = strings.TrimSpace(m.inputs[1].Value())
+	updated.WorkerCount = workers
+	updated.CompressInPlace = m.inPlace
+	return m, func() tea.Msg {
+		return NavigateMsg{To: NavSaveConfig, Data: &updated}
+	}
+}
+
+func (m SettingsModel) View() string {
+	var b strings.Builder
+	b.WriteString(style.StyleTitle.Render("Settings") + "\n\n")
+
+	rows := []struct {
+		label   string
+		field   settingsField
+		content string
+	}{
+		{"GAMMA Mods Directory", fieldModsDir, m.inputs[0].View()},
+		{"Backup Directory", fieldBackupDir, m.inputs[1].View()},
+		{"Worker Threads", fieldWorkers, m.inputs[2].View()},
+	}
+
+	for _, r := range rows {
+		label := style.StyleBody.Render(r.label)
+		if m.focused == r.field {
+			label = style.StyleSelected.Render(r.label)
+		}
+		b.WriteString(label + "\n" + r.content + "\n\n")
+	}
+
+	// In-place toggle.
+	inPlaceLabel := style.StyleBody.Render("Compress In-Place")
+	if m.focused == fieldInPlace {
+		inPlaceLabel = style.StyleSelected.Render("Compress In-Place")
+	}
+	inPlaceVal := "off"
+	if m.inPlace {
+		inPlaceVal = style.StyleSuccess.Render("on")
+	}
+	b.WriteString(inPlaceLabel + "  " + inPlaceVal + "\n\n")
+
+	if m.errMsg != "" {
+		b.WriteString(style.StyleDanger.Render(m.errMsg) + "\n\n")
+	}
+
+	b.WriteString(style.KeyHint("tab", "next") + "  ")
+	b.WriteString(fmt.Sprintf("%s  ", style.KeyHint("space", "toggle")))
+	b.WriteString(style.KeyHint("enter", "save") + "  ")
+	b.WriteString(style.KeyHint("q", "cancel"))
+	return b.String()
+}
+
+func (m *SettingsModel) SetSize(w, h int) {
+	m.width = w
+	m.height = h
+}

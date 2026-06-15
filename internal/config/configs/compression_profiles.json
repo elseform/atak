@@ -1,0 +1,21 @@
+{
+  "profiles": [
+    {
+      "name": "Normal Maps",
+      "format": "BC5_UNORM",
+      "patterns": ["*_bump.*", "*_normal.*", "*_nm.*"],
+      "generateMips": true
+    },
+    {
+      "name": "UI / Icons",
+      "format": "BC3_UNORM",
+      "patterns": ["ui/*", "*_icon.*", "*_hud.*"]
+    },
+    {
+      "name": "Diffuse / Color",
+      "format": "BC7_UNORM",
+      "patterns": ["*_d.*", "*_diff.*", "*_albedo.*"],
+      "generateMips": true
+    }
+  ]
+}
