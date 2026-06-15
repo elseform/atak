@@ -108,10 +108,10 @@ func Restore(sevenZipPath, archivePath, modName, modDir string) (<-chan Progress
 		defer close(progress)
 		defer close(done)
 
-		pattern := "Mods/" + modName + "/*"
+		pattern := "mods/" + modName + "/*"
 		args := []string{
-			"e", archivePath,
-			"-o" + modDir,
+			"x", archivePath,
+			"-o" + filepath.Dir(modDir),
 			pattern,
 			"-y",
 			"-bsp1",
@@ -141,31 +141,35 @@ func Restore(sevenZipPath, archivePath, modName, modDir string) (<-chan Progress
 	return progress, done
 }
 
-// ListMods parses `7zz l` output and returns unique mod names from the archive.
-// Assumes archive has paths like Mods/<ModName>/...
+// ListMods parses `7zz l -slt` output and returns unique mod names from the archive.
+// Uses technical listing format (one property per line) to handle spaces in paths
+// and mods without explicit directory entries.
 func ListMods(sevenZipPath, archivePath string) ([]string, error) {
-	out, err := exec.Command(sevenZipPath, "l", archivePath).Output()
+	out, err := exec.Command(sevenZipPath, "l", "-slt", archivePath).Output()
 	if err != nil {
 		return nil, fmt.Errorf("7zz list: %w", err)
 	}
 
+	const prefix = "Path = "
 	seen := make(map[string]bool)
 	var mods []string
 	for _, line := range strings.Split(string(out), "\n") {
-		// Lines look like: "2024-01-01 00:00:00 D....  0  0  Mods/SomeMod"
-		fields := strings.Fields(line)
-		for _, f := range fields {
-			if !strings.HasPrefix(f, "Mods/") {
-				continue
-			}
-			parts := strings.SplitN(f, "/", 3)
-			if len(parts) >= 2 && parts[1] != "" {
-				name := parts[1]
-				if !seen[name] {
-					seen[name] = true
-					mods = append(mods, name)
-				}
-			}
+		line = strings.TrimRight(line, "\r")
+		if !strings.HasPrefix(line, prefix) {
+			continue
+		}
+		path := line[len(prefix):]
+		if !strings.HasPrefix(strings.ToLower(path), "mods/") {
+			continue
+		}
+		parts := strings.SplitN(path, "/", 3)
+		if len(parts) < 2 || parts[1] == "" {
+			continue
+		}
+		name := parts[1]
+		if !seen[name] {
+			seen[name] = true
+			mods = append(mods, name)
 		}
 	}
 	return mods, nil

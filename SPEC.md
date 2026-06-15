@@ -216,7 +216,7 @@ explicitly choose to.
 - Confirm dialog showing: mod name, backup date, size on disk
 - Restore via:
   ```
-  7zz e <archive> -o<mod_dir> "Mods/<ModName>/*" -y
+  7zz e <archive> -o<mod_dir> "mods/<ModName>/*" -y
   ```
 - Stream progress back to UI, show completion or error
 

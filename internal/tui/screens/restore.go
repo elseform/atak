@@ -64,10 +64,14 @@ type RestoreModel struct {
 
 func NewRestore(cfg *config.Config, t *tools.EmbeddedTools) RestoreModel {
 	delegate := list.NewDefaultDelegate()
+	delegate.SetHeight(1)
+	delegate.SetSpacing(0)
+	delegate.ShowDescription = false
 	delegate.Styles.SelectedTitle = delegate.Styles.SelectedTitle.Foreground(lipgloss.Color("#E8A020"))
 	l := list.New(nil, delegate, 60, 20)
-	l.Title = "Select Mod to Restore"
+	l.SetShowTitle(false)
 	l.SetShowStatusBar(false)
+	l.SetShowHelp(false)
 	l.SetFilteringEnabled(true)
 	bar := progress.New(progress.WithDefaultGradient())
 	return RestoreModel{
@@ -236,7 +240,7 @@ func readRestoreProgress(progCh <-chan archive.ProgressMsg, doneCh <-chan error)
 
 func (m RestoreModel) View() string {
 	var b strings.Builder
-	b.WriteString(style.StyleTitle.Render("Restore Mod") + "\n\n")
+	b.WriteString(style.StyleTitle.Render("Restore Mod") + "\n")
 
 	switch m.state {
 	case restoreStatePickArchive:
@@ -257,8 +261,8 @@ func (m RestoreModel) View() string {
 		b.WriteString("\n" + style.KeyHint("enter", "list mods") + "  " + style.KeyHint("q", "back"))
 
 	case restoreStatePickMod:
-		b.WriteString(style.StyleMuted.Render("Archive: "+m.selectedBak.Name) + "\n\n")
-		b.WriteString(m.modList.View() + "\n")
+		b.WriteString(style.StyleMuted.Render("Archive: "+m.selectedBak.Name) + "\n")
+		b.WriteString(m.modList.View())
 		b.WriteString(style.KeyHint("enter", "select") + "  " + style.KeyHint("esc", "back"))
 
 	case restoreStateConfirm:
@@ -290,6 +294,6 @@ func (m RestoreModel) View() string {
 func (m *RestoreModel) SetSize(w, h int) {
 	m.width = w
 	m.height = h
-	m.modList.SetSize(w-4, h-8)
+	m.modList.SetSize(w-4, h-3)
 	m.bar.Width = w - 4
 }
