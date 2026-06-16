@@ -2,11 +2,15 @@ package screens
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/progress"
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/noisethanks/stalker-tex/internal/archive"
 	"github.com/noisethanks/stalker-tex/internal/config"
@@ -36,6 +40,7 @@ type restoreTickMsg struct {
 	doneCh <-chan error
 }
 type restoreFinishedMsg struct{ err error }
+type restoreSizeMsg struct{ bytes int64 }
 
 type modItem struct{ name string }
 
@@ -54,8 +59,10 @@ type RestoreModel struct {
 	selectedMod string
 	selectedBak archive.BackupInfo
 	bar         progress.Model
+	spinner     spinner.Model
 	curPct      float64
 	curFile     string
+	restoreSize int64
 	errMsg      string
 	statusMsg   string
 	width       int
@@ -74,11 +81,14 @@ func NewRestore(cfg *config.Config, t *tools.EmbeddedTools) RestoreModel {
 	l.SetShowHelp(false)
 	l.SetFilteringEnabled(true)
 	bar := progress.New(progress.WithDefaultGradient())
+	sp := spinner.New()
+	sp.Spinner = spinner.Dot
 	return RestoreModel{
 		cfg:     cfg,
 		tools:   t,
 		modList: l,
 		bar:     bar,
+		spinner: sp,
 	}
 }
 
@@ -117,6 +127,21 @@ func (m RestoreModel) Update(msg tea.Msg) (RestoreModel, tea.Cmd) {
 			}
 		}
 		m.state = restoreStatePickMod
+		return m, nil
+
+	case spinner.TickMsg:
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		if m.state == restoreStateRunning {
+			return m, cmd
+		}
+		return m, nil
+
+	case restoreSizeMsg:
+		m.restoreSize = msg.bytes
+		if m.state == restoreStateRunning {
+			return m, pollRestoreSize(filepath.Join(m.cfg.ModsDir, m.selectedMod))
+		}
 		return m, nil
 
 	case restoreTickMsg:
@@ -216,13 +241,34 @@ func (m RestoreModel) handleKey(msg tea.KeyMsg) (RestoreModel, tea.Cmd) {
 func (m RestoreModel) startRestore() (RestoreModel, tea.Cmd) {
 	m.state = restoreStateRunning
 	m.curPct = 0
+	m.restoreSize = 0
 	szPath := m.tools.SevenZipPath
 	archivePath := m.selectedBak.Path
 	modName := m.selectedMod
 	modDir := m.cfg.ModsDir
-	return m, func() tea.Msg {
-		progCh, doneCh := archive.Restore(szPath, archivePath, modName, modDir)
-		return readRestoreProgress(progCh, doneCh)
+
+	return m, tea.Batch(
+		m.spinner.Tick,
+		pollRestoreSize(filepath.Join(modDir, modName)),
+		func() tea.Msg {
+			progCh, doneCh := archive.Restore(szPath, archivePath, modName, modDir)
+			return readRestoreProgress(progCh, doneCh)
+		},
+	)
+}
+
+func pollRestoreSize(dir string) tea.Cmd {
+	return func() tea.Msg {
+		time.Sleep(time.Second)
+		var total int64
+		_ = filepath.Walk(dir, func(_ string, info os.FileInfo, err error) error {
+			if err != nil || info == nil || info.IsDir() {
+				return nil
+			}
+			total += info.Size()
+			return nil
+		})
+		return restoreSizeMsg{bytes: total}
 	}
 }
 
@@ -273,10 +319,13 @@ func (m RestoreModel) View() string {
 		b.WriteString(style.KeyHint("y / enter", "yes") + "  " + style.KeyHint("n / esc", "no"))
 
 	case restoreStateRunning:
-		b.WriteString(style.StyleBody.Render("Restoring "+m.selectedMod+"…") + "\n")
+		b.WriteString(style.StyleBody.Render(m.spinner.View()+" Restoring "+m.selectedMod+"…") + "\n")
+		b.WriteString(style.StyleMuted.Render("Mod: "+formatBytes(m.restoreSize)) + "\n")
 		b.WriteString(m.bar.ViewAs(m.curPct) + "\n")
 		if m.curFile != "" {
-			b.WriteString(style.StyleMuted.Render("  "+m.curFile) + "\n")
+			const label = "  Processing: "
+			maxPath := m.width - len(label)
+			b.WriteString(style.StyleMuted.Render(label+truncateLeft(m.curFile, maxPath)) + "\n")
 		}
 
 	case restoreStateDone:

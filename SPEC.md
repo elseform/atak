@@ -69,11 +69,22 @@ Windows: %AppData%\stalker-tex\
 
 Each contains:
 ```
-├── config.json          # user prefs (gamma path, backup path, last used settings)
-└── profiles.json        # optional: overrides embedded compression profiles
+├── config.json     # user prefs (gamma path, backup path, last used settings)
+└── profiles.json   # compression profiles — created on first run from embedded default
 ```
 
-Embedded default profiles (in `configs/compression_profiles.json`):
+### Profiles Design
+
+**All compression logic lives in `profiles.json` — nothing is hardcoded in the binary.**
+This includes format selection, pattern matching, and mip generation. The binary only
+knows how to read and apply profiles, not what they should contain.
+
+**First-run behavior:** if `profiles.json` does not exist in the config dir, the tool
+copies the embedded default to `~/.config/stalker-tex/profiles.json` and shows a notice
+telling the user where to find it. The user owns this file from that point forward.
+
+**The embedded default** (`configs/compression_profiles.json`) is the seed — it ships
+with broadly correct STALKER conventions but users are expected to tune it:
 
 ```json
 {
@@ -81,26 +92,38 @@ Embedded default profiles (in `configs/compression_profiles.json`):
     {
       "name": "Normal Maps",
       "format": "BC5_UNORM",
-      "patterns": ["*_bump.*", "*_normal.*", "*_nm.*"],
-      "generateMips": true
+      "generateMips": true,
+      "patterns": ["*_bump.*", "*_normal.*", "*_nm.*", "*_nmap.*"]
     },
     {
       "name": "UI / Icons",
       "format": "BC3_UNORM",
-      "patterns": ["ui/*", "*_icon.*", "*_hud.*"]
+      "generateMips": false,
+      "patterns": ["ui/*", "*_icon.*", "*_hud.*", "*_ui.*"]
     },
     {
       "name": "Diffuse / Color",
       "format": "BC7_UNORM",
-      "patterns": ["*_d.*", "*_diff.*", "*_albedo.*"],
-      "generateMips": true
+      "generateMips": true,
+      "patterns": ["*_d.*", "*_diff.*", "*_albedo.*", "*_base.*", "*_col.*"]
+    },
+    {
+      "name": "Specular / Gloss",
+      "format": "BC3_UNORM",
+      "generateMips": true,
+      "patterns": ["*_spec.*", "*_gloss.*"]
     }
   ]
 }
 ```
 
-User-provided `~/.config/stalker-tex/profiles.json` takes precedence if present.
-This is the primary contribution surface for community tuning — no Go required.
+**Unmatched files** — DDS files that don't match any profile pattern are surfaced in
+scan results as a separate "Unmatched" bucket. The user can assign them a format
+manually in the Compression Config screen before compressing, or skip them entirely.
+
+**Community sharing** — users can share `profiles.json` files tuned for specific mod
+packs. The Settings screen shows the path to `profiles.json` and offers an
+"Open in editor" option using `$EDITOR` (Linux) or `notepad.exe` (Windows).
 
 ---
 
@@ -216,18 +239,69 @@ explicitly choose to.
 - Confirm dialog showing: mod name, backup date, size on disk
 - Restore via:
   ```
-  7zz e <archive> -o<mod_dir> "mods/<ModName>/*" -y
+  7zz e <archive> -o<mod_dir> "Mods/<ModName>/*" -y
   ```
 - Stream progress back to UI, show completion or error
 
 ### 3. Scan
 
 - Walk the MO2 mods directory recursively
-- For each `.dds` file: read the first 128 bytes, parse the DDS header
-- Classify as: already compressed (BC1/BC3/BC5/BC7), uncompressed, unknown
-- Match filename against compression profiles to determine suggested format
+- For each `.dds` file: read the first 148 bytes, parse the DDS header (including DX10 extended header)
+- Skip files where `DDSInfo.Compressed == true` — never re-compress already compressed textures
 - Emit `assetFoundMsg` per file (async Cmd) so UI stays live during scan
-- Group results by matched profile for display
+- Group results by profile for display
+
+#### Classification — Two-Pass System
+
+Classification uses two passes. Header data is primary; filename patterns are override.
+
+**Pass 1 — Header-based default (always runs first):**
+```
+HasAlpha == true  → SuggestedFmt: BC7_UNORM,  ProfileMatch: "Auto (alpha)"
+HasAlpha == false → SuggestedFmt: BC1_UNORM,  ProfileMatch: "Auto (no alpha)"
+```
+Every uncompressed file gets a safe default format from its actual pixel data.
+BC7 for alpha textures (high quality, preserves transparency), BC1 for opaque
+(smallest footprint).
+
+**Pass 2 — Filename pattern override (runs after, overwrites if matched):**
+```
+*_bump.*, *_normal.* → BC5_UNORM  "Normal Maps"    (overrides header — normal maps
+                                                     may have alpha for gloss data
+                                                     but still need BC5)
+*/textures/ui/*      → BC3_UNORM  "UI / Icons"     (engine expects BC3 for UI)
+*_diff.*, *_base.*   → BC7_UNORM  "Diffuse / Color" (confirms/upgrades header)
+```
+Filename match always wins over header default. Profiles are fully user-defined
+in `profiles.json` — the binary applies whatever profiles are loaded.
+
+**Result buckets in scan results:**
+- One bucket per named profile (from profiles.json)
+- `Auto (alpha)` — unmatched files with alpha channel, suggested BC7
+- `Auto (no alpha)` — unmatched files without alpha, suggested BC1
+- All buckets shown regardless of count (zero-hit profiles still render)
+
+There is no "Unmatched" bucket — every uncompressed file gets a suggested format.
+
+#### Scanner Exclusions
+
+Directory exclusions are user-configurable via `scanExclusions` in `config.json`.
+Value is a list of glob patterns matched against directory **names** (not full paths)
+using `filepath.Match`.
+
+Default value shipped in config:
+```json
+"scanExclusions": [".*", "downloads", "Downloads"]
+```
+
+- `.*` — skips all hidden directories (e.g. `.Grok's Modpack Installer`, `.git`)
+- `downloads` / `Downloads` — skips the GAMMA downloads folder (both cases for Linux)
+
+Surfaced in the Settings screen as an editable list — users can add or remove patterns.
+
+**Hardcoded exclusions (never user-configurable):**
+- Files where `DDSInfo.Compressed == true` — never re-compress already compressed textures
+- Files without `.dds` extension — only DDS files are processed
 
 ### 4. Compress
 
@@ -253,7 +327,20 @@ explicitly choose to.
   - All other 7z flags (`-mfb=64 -md=32m -ms=on -xr!downloads`) are hardcoded, not user-exposed
 - Worker thread count for texture compression (default: `max(1, runtime.NumCPU()/2)`)
 - Whether to compress textures in-place or to a staging directory
+- Scan exclusions — editable list of glob patterns, default: `[".*", "downloads", "Downloads"]`
 - Persist to `os.UserConfigDir()/stalker-tex/config.json`
+
+Full config.json schema:
+```json
+{
+  "modsDir": "/home/user/GAMMA/mods",
+  "backupDir": "/home/user/GAMMA/backup",
+  "workerCount": 4,
+  "compressInPlace": true,
+  "backupLevel": 6,
+  "scanExclusions": [".*", "downloads", "Downloads"]
+}
+```
 
 ---
 

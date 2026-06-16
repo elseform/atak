@@ -1,21 +1,40 @@
 {
   "profiles": [
     {
-      "name": "Normal Maps",
-      "format": "BC5_UNORM",
-      "patterns": ["*_bump.*", "*_normal.*", "*_nm.*"],
-      "generateMips": true
-    },
-    {
       "name": "UI / Icons",
       "format": "BC3_UNORM",
-      "patterns": ["ui/*", "*_icon.*", "*_hud.*"]
+      "generateMips": false,
+      "patterns": ["*/textures/ui/*", "*_icons.*"]
+    },
+    {
+      "name": "Normal Maps",
+      "format": "BC5_UNORM",
+      "generateMips": true,
+      "patterns": ["*_bump.*", "*_bump#.*", "*_normal.*", "*_nm.*", "*_nmap.*"]
     },
     {
       "name": "Diffuse / Color",
       "format": "BC7_UNORM",
-      "patterns": ["*_d.*", "*_diff.*", "*_albedo.*"],
-      "generateMips": true
+      "generateMips": true,
+      "patterns": [
+        "*_d.*", "*_diff.*", "*_diffuse.*",
+        "*_albedo.*", "*_base.*",
+        "*_col.*", "*_color.*", "*_co.*",
+        "*_c.*", "*_b.*", "*_rgb.*",
+        "*_details.*"
+      ]
+    },
+    {
+      "name": "Specular / Gloss",
+      "format": "BC3_UNORM",
+      "generateMips": true,
+      "patterns": ["*_spec.*", "*_gloss.*"]
+    },
+    {
+      "name": "Masks / Alpha",
+      "format": "BC3_UNORM",
+      "generateMips": true,
+      "patterns": ["*_mask.*", "*_alpha.*"]
     }
   ]
 }

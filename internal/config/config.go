@@ -26,11 +26,12 @@ type profileFile struct {
 
 // Config holds all user-persisted preferences.
 type Config struct {
-	ModsDir        string `json:"modsDir"`
-	BackupDir      string `json:"backupDir"`
-	WorkerCount    int    `json:"workerCount"`
-	CompressInPlace bool  `json:"compressInPlace"`
-	StagingDir     string `json:"stagingDir,omitempty"`
+	ModsDir         string   `json:"modsDir"`
+	BackupDir       string   `json:"backupDir"`
+	WorkerCount     int      `json:"workerCount"`
+	CompressInPlace bool     `json:"compressInPlace"`
+	StagingDir      string   `json:"stagingDir,omitempty"`
+	ScanExclusions  []string `json:"scanExclusions,omitempty"`
 }
 
 func configDir() (string, error) {
@@ -58,6 +59,9 @@ func Load() (*Config, error) {
 	var cfg Config
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, err
+	}
+	if len(cfg.ScanExclusions) == 0 {
+		cfg.ScanExclusions = []string{".*", "downloads", "Downloads"}
 	}
 	return &cfg, nil
 }
@@ -97,6 +101,12 @@ func LoadProfiles() ([]Profile, error) {
 	userPath := filepath.Join(dir, "profiles.json")
 	data, err := os.ReadFile(userPath)
 	if errors.Is(err, os.ErrNotExist) {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return nil, err
+		}
+		if err := os.WriteFile(userPath, defaultProfilesJSON, 0644); err != nil {
+			return nil, err
+		}
 		data = defaultProfilesJSON
 	} else if err != nil {
 		return nil, err
@@ -110,9 +120,10 @@ func LoadProfiles() ([]Profile, error) {
 
 func defaultConfig() *Config {
 	return &Config{
-		ModsDir:        detectModsDir(),
-		WorkerCount:    max(1, runtime.NumCPU()/2),
+		ModsDir:         detectModsDir(),
+		WorkerCount:     max(1, runtime.NumCPU()/2),
 		CompressInPlace: true,
+		ScanExclusions:  []string{".*", "downloads", "Downloads"},
 	}
 }
 

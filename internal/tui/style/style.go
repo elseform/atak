@@ -6,7 +6,7 @@ var (
 	// Base colors.
 	colorPrimary  = lipgloss.Color("#E8A020") // amber — STALKER feel
 	colorDim      = lipgloss.Color("#7A6040")
-	colorMuted    = lipgloss.Color("#555555")
+	colorMuted    = lipgloss.Color("#999999")
 	colorSuccess  = lipgloss.Color("#4CAF50")
 	colorWarning  = lipgloss.Color("#FFC107")
 	colorDanger   = lipgloss.Color("#F44336")

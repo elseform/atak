@@ -2,12 +2,14 @@ package screens
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/progress"
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/noisethanks/stalker-tex/internal/archive"
 	"github.com/noisethanks/stalker-tex/internal/config"
 	"github.com/noisethanks/stalker-tex/internal/tools"
@@ -35,26 +37,32 @@ type archiveFinishedMsg struct{ err error }
 
 type backupsLoadedMsg struct{ backups []archive.BackupInfo }
 type verifyDoneMsg struct{ err error }
+type backupSizeMsg struct{ bytes int64 }
 
 // BackupModel manages listing, creating, deleting, and verifying backups.
 type BackupModel struct {
-	cfg       *config.Config
-	tools     *tools.EmbeddedTools
-	state     backupState
-	backups   []archive.BackupInfo
-	cursor    int
-	bar       progress.Model
-	curPct    float64
-	curFile   string
-	statusMsg string
-	errMsg    string
-	width     int
-	height    int
+	cfg         *config.Config
+	tools       *tools.EmbeddedTools
+	state       backupState
+	backups     []archive.BackupInfo
+	cursor      int
+	bar         progress.Model
+	spinner     spinner.Model
+	curPct      float64
+	curFile     string
+	archiveSize int64
+	outPath     string
+	statusMsg   string
+	errMsg      string
+	width       int
+	height      int
 }
 
 func NewBackup(cfg *config.Config, t *tools.EmbeddedTools) BackupModel {
 	bar := progress.New(progress.WithDefaultGradient())
-	return BackupModel{cfg: cfg, tools: t, bar: bar}
+	sp := spinner.New()
+	sp.Spinner = spinner.Dot
+	return BackupModel{cfg: cfg, tools: t, bar: bar, spinner: sp}
 }
 
 func (m BackupModel) Init() tea.Cmd {
@@ -75,6 +83,21 @@ func (m BackupModel) Update(msg tea.Msg) (BackupModel, tea.Cmd) {
 		m.backups = msg.backups
 		if m.cursor >= len(m.backups) && len(m.backups) > 0 {
 			m.cursor = len(m.backups) - 1
+		}
+		return m, nil
+
+	case spinner.TickMsg:
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		if m.state == backupStateCreating {
+			return m, cmd
+		}
+		return m, nil
+
+	case backupSizeMsg:
+		m.archiveSize = msg.bytes
+		if m.state == backupStateCreating {
+			return m, pollBackupSize(m.outPath)
 		}
 		return m, nil
 
@@ -171,14 +194,31 @@ func (m BackupModel) handleKey(key string) (BackupModel, tea.Cmd) {
 func (m BackupModel) startBackup() (BackupModel, tea.Cmd) {
 	m.state = backupStateCreating
 	m.curPct = 0
+	m.archiveSize = 0
 	szPath := m.tools.SevenZipPath
 	modsDir := m.cfg.ModsDir
 	outPath := filepath.Join(m.cfg.BackupDir, fmt.Sprintf(
 		"gamma-backup-%s.7z", time.Now().Format("2006-01-02-150405")))
+	m.outPath = outPath
 
-	return m, func() tea.Msg {
-		progCh, doneCh := archive.Backup(szPath, modsDir, outPath)
-		return readArchiveProgress(progCh, doneCh)
+	return m, tea.Batch(
+		m.spinner.Tick,
+		pollBackupSize(outPath),
+		func() tea.Msg {
+			progCh, doneCh := archive.Backup(szPath, modsDir, outPath)
+			return readArchiveProgress(progCh, doneCh)
+		},
+	)
+}
+
+func pollBackupSize(path string) tea.Cmd {
+	return func() tea.Msg {
+		time.Sleep(time.Second)
+		info, err := os.Stat(path)
+		if err != nil {
+			return backupSizeMsg{}
+		}
+		return backupSizeMsg{bytes: info.Size()}
 	}
 }
 
@@ -209,10 +249,13 @@ func (m BackupModel) View() string {
 
 	switch m.state {
 	case backupStateCreating:
-		b.WriteString(style.StyleBody.Render("Creating backup…") + "\n")
+		b.WriteString(style.StyleBody.Render(m.spinner.View()+" Creating backup…") + "\n")
+		b.WriteString(style.StyleMuted.Render("Archive: "+formatBytes(m.archiveSize)) + "\n")
 		b.WriteString(m.bar.ViewAs(m.curPct) + "\n")
 		if m.curFile != "" {
-			b.WriteString(style.StyleMuted.Render("  "+m.curFile) + "\n")
+			const label = "  Processing: "
+			maxPath := m.width - len(label)
+			b.WriteString(style.StyleMuted.Render(label+truncateLeft(m.curFile, maxPath)) + "\n")
 		}
 		return b.String()
 
@@ -263,4 +306,18 @@ func (m *BackupModel) SetSize(w, h int) {
 	m.width = w
 	m.height = h
 	m.bar.Width = w - 4
+}
+
+// truncateLeft shortens s from the left to maxLen bytes, prefixing "..." if truncated.
+func truncateLeft(s string, maxLen int) string {
+	if maxLen <= 0 {
+		return ""
+	}
+	if len(s) <= maxLen {
+		return s
+	}
+	if maxLen <= 3 {
+		return s[len(s)-maxLen:]
+	}
+	return "..." + s[len(s)-(maxLen-3):]
 }

@@ -17,7 +17,6 @@ type Asset struct {
 	Width        int
 	Height       int
 	HasAlpha     bool
-	MipMapCount  int
 	ProfileMatch string
 	SuggestedFmt string
 }
@@ -25,7 +24,7 @@ type Asset struct {
 // Walk traverses modsDir, emitting Asset values for every .dds file found.
 // Each asset is sent on the returned channel; the channel is closed when done.
 // Errors during individual file parsing are non-fatal; the asset is skipped.
-func Walk(modsDir string, profiles []config.Profile) (<-chan Asset, <-chan error) {
+func Walk(modsDir string, profiles []config.Profile, exclusions []string) (<-chan Asset, <-chan error) {
 	assets := make(chan Asset, 256)
 	errs := make(chan error, 1)
 
@@ -38,6 +37,11 @@ func Walk(modsDir string, profiles []config.Profile) (<-chan Asset, <-chan error
 				return nil // skip unreadable entries, keep walking
 			}
 			if d.IsDir() {
+				for _, pattern := range exclusions {
+					if matched, err := filepath.Match(pattern, d.Name()); err == nil && matched {
+						return filepath.SkipDir
+					}
+				}
 				return nil
 			}
 			if !strings.EqualFold(filepath.Ext(path), ".dds") {
@@ -48,10 +52,25 @@ func Walk(modsDir string, profiles []config.Profile) (<-chan Asset, <-chan error
 			if err != nil {
 				return nil // skip unparseable files silently
 			}
+			if info.Compressed {
+				return nil
+			}
 
 			rel, _ := filepath.Rel(modsDir, path)
 			modName := modNameFromRel(rel)
-			profile, suggestedFmt := matchProfile(path, profiles)
+
+			// Pass 1: header-based default.
+			profileMatch := "Auto (no alpha)"
+			suggestedFmt := "BC1_UNORM"
+			if info.HasAlpha {
+				profileMatch = "Auto (alpha)"
+				suggestedFmt = "BC7_UNORM"
+			}
+			// Pass 2: filename pattern override wins if matched.
+			if p, f := matchProfile(path, profiles); p != "" {
+				profileMatch = p
+				suggestedFmt = f
+			}
 
 			assets <- Asset{
 				Path:         path,
@@ -61,8 +80,7 @@ func Walk(modsDir string, profiles []config.Profile) (<-chan Asset, <-chan error
 				Width:        info.Width,
 				Height:       info.Height,
 				HasAlpha:     info.HasAlpha,
-				MipMapCount:  info.MipMapCount,
-				ProfileMatch: profile,
+				ProfileMatch: profileMatch,
 				SuggestedFmt: suggestedFmt,
 			}
 			return nil
@@ -86,11 +104,11 @@ func modNameFromRel(rel string) string {
 
 // matchProfile returns the profile name and suggested format for the given file path.
 func matchProfile(path string, profiles []config.Profile) (string, string) {
-	base := filepath.Base(path)
+	base := strings.ToLower(filepath.Base(path))
 	for _, p := range profiles {
 		for _, pattern := range p.Patterns {
 			// filepath.Match handles glob patterns.
-			matched, err := filepath.Match(pattern, base)
+			matched, err := filepath.Match(strings.ToLower(pattern), base)
 			if err == nil && matched {
 				return p.Name, p.Format
 			}
@@ -98,8 +116,8 @@ func matchProfile(path string, profiles []config.Profile) (string, string) {
 			if strings.Contains(pattern, "/") || strings.Contains(pattern, string(filepath.Separator)) {
 				rel := filepath.ToSlash(path)
 				if idx := strings.LastIndex(rel, "/"); idx >= 0 {
-					tail := rel[max(0, idx-20):]
-					if matched, err := filepath.Match(filepath.ToSlash(pattern), tail); err == nil && matched {
+					tail := strings.ToLower(rel[max(0, idx-20):])
+					if matched, err := filepath.Match(strings.ToLower(filepath.ToSlash(pattern)), tail); err == nil && matched {
 						return p.Name, p.Format
 					}
 				}

@@ -51,7 +51,7 @@ func (m ScanModel) startScan() tea.Cmd {
 		if err != nil || len(profiles) == 0 {
 			return scanCompleteMsg{total: 0}
 		}
-		ch, _ := scan.Walk(modsDir, profiles)
+		ch, _ := scan.Walk(modsDir, profiles, m.cfg.ScanExclusions)
 		return readNextAsset(ch)
 	}
 }

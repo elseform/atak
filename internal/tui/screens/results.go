@@ -22,11 +22,12 @@ type ResultsModel struct {
 }
 
 func NewResults(assets []scan.Asset, cfg *config.Config) ResultsModel {
-	groups := make(map[string]*AssetGroup)
+	var ordered []AssetGroup
+	groupIdx := make(map[string]int) // profile name -> index in ordered
 	var unmatched, done []scan.Asset
 
 	for _, a := range assets {
-		if a.Compressed && a.ProfileMatch == "" {
+		if a.Compressed {
 			done = append(done, a)
 			continue
 		}
@@ -34,15 +35,16 @@ func NewResults(assets []scan.Asset, cfg *config.Config) ResultsModel {
 			unmatched = append(unmatched, a)
 			continue
 		}
-		g, ok := groups[a.ProfileMatch]
+		idx, ok := groupIdx[a.ProfileMatch]
 		if !ok {
-			g = &AssetGroup{
+			idx = len(ordered)
+			groupIdx[a.ProfileMatch] = idx
+			ordered = append(ordered, AssetGroup{
 				ProfileName:  a.ProfileMatch,
 				SuggestedFmt: a.SuggestedFmt,
-			}
-			groups[a.ProfileMatch] = g
+			})
 		}
-		g.Assets = append(g.Assets, assetRef{
+		ordered[idx].Assets = append(ordered[idx].Assets, assetRef{
 			Path:       a.Path,
 			ModName:    a.ModName,
 			CurrentFmt: a.CurrentFmt,
@@ -50,12 +52,6 @@ func NewResults(assets []scan.Asset, cfg *config.Config) ResultsModel {
 			Height:     a.Height,
 			Compressed: a.Compressed,
 		})
-	}
-
-	// Stable order — put unmatched last.
-	var ordered []AssetGroup
-	for _, g := range groups {
-		ordered = append(ordered, *g)
 	}
 
 	return ResultsModel{
