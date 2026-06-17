@@ -35,8 +35,11 @@ func Run(texconvPath string, asset scan.Asset, format string, generateMips bool,
 	} else {
 		args = append(args, "-m", "1") // no mip generation
 	}
-	args = append(args, asset.Path)
+	args = append(args, "--", asset.Path)
 
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		return CompressionResult{Asset: asset, Success: false, Err: err}
+	}
 	cmd := exec.Command(texconvPath, args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr

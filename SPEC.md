@@ -305,16 +305,48 @@ Surfaced in the Settings screen as an editable list — users can add or remove 
 
 ### 4. Compress
 
-- User reviews scan results grouped by profile, can override per-category format
-- Configurable worker count (default: `runtime.NumCPU() / 2`)
+#### Compression Config Screen
+
+Format and mip settings are defined entirely in `profiles.json` — they are NOT
+overridable in the UI. The compression config screen is a confirmation step only,
+not a settings screen.
+
+**What the config screen shows:**
+- Summary of files to be compressed (count per profile bucket)
+- Worker count (read from config, display only — edit in Settings)
+- In-place vs staging directory (read from config, display only — edit in Settings)
+- Three run scope options:
+
+```
+Run Scope:
+  > Run All               ← compress all 2222 files across all profiles
+    Run Selected Profile  ← pick one profile bucket (e.g. Normal Maps only)
+    Run Selected Mod      ← pick one mod, compress its files across all profiles
+```
+
+**Run Selected Mod** is the recommended first-time workflow — compress one small
+mod, verify it looks correct in game, then run all. Surface this recommendation
+in the UI.
+
+**What the config screen does NOT have:**
+- Per-profile format picker (format comes from profiles.json)
+- Per-profile mip toggle (generateMips comes from profiles.json)
+- In-place toggle (global setting, lives in Settings screen only)
+
+#### Compression Execution
+
+- Worker pool: `max(1, runtime.NumCPU()/2)` concurrent texconv processes
 - Per-file texconv invocation:
   ```
   texconv -f <FORMAT> -m 0 -y -o <output_dir> <input_file>
   ```
+  Where `-m 0` generates full mip chain if `generateMips == true` in profile,
+  or `-m 1` for no mips if `generateMips == false`
 - Capture stdout/stderr per file into `CompressionResult`
 - Emit `compressionDoneMsg` per file to update progress bar
 - On completion: show summary with success count, error count, estimated VRAM delta
-- Error list is navigable; failed files can be retried with different settings
+- Error list is navigable; failed files can be retried
+- No retry with different settings — if a file failed, fix profiles.json and rescan
 
 ### 5. Settings
 
@@ -327,6 +359,7 @@ Surfaced in the Settings screen as an editable list — users can add or remove 
   - All other 7z flags (`-mfb=64 -md=32m -ms=on -xr!downloads`) are hardcoded, not user-exposed
 - Worker thread count for texture compression (default: `max(1, runtime.NumCPU()/2)`)
 - Whether to compress textures in-place or to a staging directory
+  (this is the only place this toggle exists — not in the compression config screen)
 - Scan exclusions — editable list of glob patterns, default: `[".*", "downloads", "Downloads"]`
 - Persist to `os.UserConfigDir()/stalker-tex/config.json`
 

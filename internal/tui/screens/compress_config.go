@@ -2,7 +2,7 @@ package screens
 
 import (
 	"fmt"
-	"path/filepath"
+	"sort"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -10,51 +10,35 @@ import (
 	"github.com/noisethanks/stalker-tex/internal/tui/style"
 )
 
-var bcnFormats = []string{
-	"BC1_UNORM",
-	"BC3_UNORM",
-	"BC4_UNORM",
-	"BC5_UNORM",
-	"BC6H_UF16",
-	"BC7_UNORM",
-}
-
-type configRow struct {
-	group        AssetGroup
-	formatIdx    int // index into bcnFormats
-	generateMips bool
-}
-
-// CompressConfigModel lets the user override per-category format before compressing.
+// CompressConfigModel is a confirmation and run-scope selection screen.
+// Format and mip settings come from profiles.json — no per-profile overrides here.
 type CompressConfigModel struct {
-	rows    []configRow
-	cursor  int
-	inPlace bool
-	cfg     *config.Config
-	width   int
-	height  int
+	groups    []AssetGroup
+	mods      []string // unique mod names, sorted alphabetically
+	mode      int      // 0=scope-select  1=profile-pick  2=mod-pick
+	cursor    int
+	modOffset int // first visible row in mod-pick viewport
+	cfg       *config.Config
+	width     int
+	height    int
 }
 
 func NewCompressConfig(data CompressConfigData, cfg *config.Config) CompressConfigModel {
-	rows := make([]configRow, len(data.Groups))
-	for i, g := range data.Groups {
-		fmtIdx := 0
-		for j, f := range bcnFormats {
-			if f == g.SuggestedFmt {
-				fmtIdx = j
-				break
+	seen := make(map[string]bool)
+	var mods []string
+	for _, g := range data.Groups {
+		for _, a := range g.Assets {
+			if !seen[a.ModName] {
+				seen[a.ModName] = true
+				mods = append(mods, a.ModName)
 			}
 		}
-		rows[i] = configRow{
-			group:        g,
-			formatIdx:    fmtIdx,
-			generateMips: false,
-		}
 	}
+	sort.Strings(mods)
 	return CompressConfigModel{
-		rows:    rows,
-		inPlace: cfg.CompressInPlace,
-		cfg:     cfg,
+		groups: data.Groups,
+		mods:   mods,
+		cfg:    cfg,
 	}
 }
 
@@ -63,57 +47,149 @@ func (m CompressConfigModel) Init() tea.Cmd { return nil }
 func (m CompressConfigModel) Update(msg tea.Msg) (CompressConfigModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		switch msg.String() {
+		return m.handleKey(msg.String())
+	}
+	return m, nil
+}
+
+func (m CompressConfigModel) handleKey(key string) (CompressConfigModel, tea.Cmd) {
+	switch m.mode {
+	case 0: // scope select
+		switch key {
 		case "up", "k":
 			if m.cursor > 0 {
 				m.cursor--
 			}
 		case "down", "j":
-			if m.cursor < len(m.rows)-1 {
+			if m.cursor < 2 {
 				m.cursor++
 			}
-		case "left", "h":
-			r := &m.rows[m.cursor]
-			if r.formatIdx > 0 {
-				r.formatIdx--
-			}
-		case "right", "l":
-			r := &m.rows[m.cursor]
-			if r.formatIdx < len(bcnFormats)-1 {
-				r.formatIdx++
-			}
-		case "m":
-			m.rows[m.cursor].generateMips = !m.rows[m.cursor].generateMips
-		case "i":
-			m.inPlace = !m.inPlace
 		case "enter":
-			return m, m.buildJobs()
+			switch m.cursor {
+			case 0:
+				return m, m.buildJobs(0, "", "")
+			case 1:
+				if len(m.groups) > 0 {
+					m.mode = 1
+					m.cursor = 0
+				}
+			case 2:
+				if len(m.mods) > 0 {
+					m.mode = 2
+					m.cursor = 0
+					m.modOffset = 0
+				}
+			}
 		case "esc", "q":
 			return m, func() tea.Msg { return NavigateMsg{To: NavResults} }
+		}
+
+	case 1: // profile pick
+		switch key {
+		case "up", "k":
+			if m.cursor > 0 {
+				m.cursor--
+			}
+		case "down", "j":
+			if m.cursor < len(m.groups)-1 {
+				m.cursor++
+			}
+		case "enter":
+			if len(m.groups) > 0 {
+				return m, m.buildJobs(1, m.groups[m.cursor].ProfileName, "")
+			}
+		case "esc":
+			m.mode = 0
+			m.cursor = 1
+		}
+
+	case 2: // mod pick
+		pg := m.modPageSize()
+		switch key {
+		case "up", "k":
+			if m.cursor > 0 {
+				m.cursor--
+				if m.cursor < m.modOffset {
+					m.modOffset = m.cursor
+				}
+			}
+		case "down", "j":
+			if m.cursor < len(m.mods)-1 {
+				m.cursor++
+				if m.cursor >= m.modOffset+pg {
+					m.modOffset = m.cursor - pg + 1
+				}
+			}
+		case "enter":
+			if len(m.mods) > 0 {
+				return m, m.buildJobs(2, "", m.mods[m.cursor])
+			}
+		case "esc":
+			m.mode = 0
+			m.cursor = 2
+			m.modOffset = 0
 		}
 	}
 	return m, nil
 }
 
-func (m CompressConfigModel) buildJobs() tea.Cmd {
-	rows := m.rows
+func (m CompressConfigModel) buildJobs(scope int, selectedProfile, selectedMod string) tea.Cmd {
+	groups := m.groups
 	cfg := m.cfg
-	inPlace := m.inPlace
 	return func() tea.Msg {
-		var groups []ConfiguredGroup
-		for _, r := range rows {
+		profiles, _ := config.LoadProfiles()
+		mipsFor := func(name string) bool {
+			for _, p := range profiles {
+				if p.Name == name {
+					return p.GenerateMips
+				}
+			}
+			return true // auto groups ("Auto (alpha)", "Auto (no alpha)") default to generating mips
+		}
+
+		var filtered []AssetGroup
+		switch scope {
+		case 0: // Run All
+			filtered = groups
+		case 1: // Run Selected Profile
+			for _, g := range groups {
+				if g.ProfileName == selectedProfile {
+					filtered = append(filtered, g)
+					break
+				}
+			}
+		case 2: // Run Selected Mod — collect that mod's assets from every profile group
+			for _, g := range groups {
+				var modAssets []assetRef
+				for _, a := range g.Assets {
+					if a.ModName == selectedMod {
+						modAssets = append(modAssets, a)
+					}
+				}
+				if len(modAssets) > 0 {
+					filtered = append(filtered, AssetGroup{
+						ProfileName:  g.ProfileName,
+						SuggestedFmt: g.SuggestedFmt,
+						Assets:       modAssets,
+					})
+				}
+			}
+		}
+
+		var configured []ConfiguredGroup
+		for _, g := range filtered {
 			var paths []string
-			for _, a := range r.group.Assets {
+			for _, a := range g.Assets {
 				paths = append(paths, a.Path)
 			}
 			outputDir := ""
-			if !inPlace && cfg.StagingDir != "" {
+			if !cfg.CompressInPlace && cfg.StagingDir != "" {
 				outputDir = cfg.StagingDir
 			}
-			groups = append(groups, ConfiguredGroup{
-				ProfileName:  r.group.ProfileName,
-				Format:       bcnFormats[r.formatIdx],
-				GenerateMips: r.generateMips,
+			configured = append(configured, ConfiguredGroup{
+				ProfileName:  g.ProfileName,
+				Format:       g.SuggestedFmt,
+				GenerateMips: mipsFor(g.ProfileName),
 				Paths:        paths,
 				OutputDir:    outputDir,
 			})
@@ -121,73 +197,145 @@ func (m CompressConfigModel) buildJobs() tea.Cmd {
 		return NavigateMsg{
 			To: NavCompress,
 			Data: CompressJobData{
-				Groups:      groups,
+				Groups:      configured,
 				WorkerCount: cfg.WorkerCount,
 			},
 		}
 	}
 }
 
+func (m CompressConfigModel) modPageSize() int {
+	// Chrome: title(1) + blank(1) + summary(1) + blank(1) + header(1) + blank(1) + hints(1) = 7
+	if m.height <= 7 {
+		return 5
+	}
+	return m.height - 7
+}
+
+func (m CompressConfigModel) totalFiles() int {
+	n := 0
+	for _, g := range m.groups {
+		n += len(g.Assets)
+	}
+	return n
+}
+
 func (m CompressConfigModel) View() string {
 	var b strings.Builder
-	b.WriteString(style.StyleTitle.Render("Compression Settings") + "\n\n")
+	b.WriteString(style.StyleTitle.Render("Compression Config") + "\n\n")
 
-	for i, r := range m.rows {
-		selected := i == m.cursor
-		total := len(r.group.Assets)
+	total := m.totalFiles()
+	outputMode := "in-place"
+	if !m.cfg.CompressInPlace {
+		if m.cfg.StagingDir != "" {
+			outputMode = m.cfg.StagingDir
+		} else {
+			outputMode = "staging (no dir set)"
+		}
+	}
+	b.WriteString(style.StyleMuted.Render(fmt.Sprintf(
+		"%d files  ·  %d workers  ·  %s",
+		total, m.cfg.WorkerCount, outputMode,
+	)) + "\n\n")
+
+	switch m.mode {
+	case 0:
+		m.viewScope(&b, total)
+	case 1:
+		m.viewProfilePick(&b)
+	case 2:
+		m.viewModPick(&b)
+	}
+	return b.String()
+}
+
+func (m CompressConfigModel) viewScope(b *strings.Builder, total int) {
+	type scopeOpt struct {
+		label string
+		hint  string
+	}
+	opts := []scopeOpt{
+		{fmt.Sprintf("Run All  (%d files)", total), ""},
+		{"Run Selected Profile  →", ""},
+		{"Run Selected Mod  →", "start here if first time"},
+	}
+	for i, o := range opts {
 		prefix := "  "
-		if selected {
+		if i == m.cursor {
 			prefix = style.StyleSelected.Render("▶ ")
 		}
-
-		fmtDisplay := fmt.Sprintf("← %s →", bcnFormats[r.formatIdx])
-		mipsDisplay := "mips:off"
-		if r.generateMips {
-			mipsDisplay = "mips:on"
+		line := prefix + o.label
+		if o.hint != "" {
+			line += "   " + style.StyleMuted.Render(o.hint)
 		}
-
-		line := fmt.Sprintf("%s%-20s  %s  %s  %s",
-			prefix,
-			r.group.ProfileName,
-			style.StyleSelected.Render(fmtDisplay),
-			style.StyleMuted.Render(mipsDisplay),
-			style.StyleMuted.Render(fmt.Sprintf("(%d files)", total)),
-		)
-		if selected {
-			b.WriteString(style.StylePanelFocused.Render(line))
-		} else {
-			b.WriteString(line)
-		}
-		b.WriteString("\n")
-
-		// Show sample paths for focused row.
-		if selected && len(r.group.Assets) > 0 {
-			limit := 3
-			if len(r.group.Assets) < limit {
-				limit = len(r.group.Assets)
-			}
-			for _, a := range r.group.Assets[:limit] {
-				b.WriteString(style.StyleMuted.Render("    " + filepath.Base(a.Path)) + "\n")
-			}
-			if len(r.group.Assets) > limit {
-				b.WriteString(style.StyleMuted.Render(fmt.Sprintf("    … and %d more\n", len(r.group.Assets)-limit)))
-			}
-		}
+		b.WriteString(line + "\n")
 	}
-
-	outputMode := "in-place (overwrite originals)"
-	if !m.inPlace {
-		outputMode = "staging dir: " + m.cfg.StagingDir
-	}
-	b.WriteString("\n" + style.StyleBody.Render("Output: "+outputMode) + "\n\n")
-
-	b.WriteString(style.KeyHint("↑↓", "select row") + "  ")
-	b.WriteString(style.KeyHint("←→", "change format") + "  ")
-	b.WriteString(style.KeyHint("m", "toggle mips") + "  ")
-	b.WriteString(style.KeyHint("i", "toggle in-place") + "  ")
-	b.WriteString(style.KeyHint("enter", "start") + "  ")
+	b.WriteString("\n")
+	b.WriteString(style.KeyHint("↑↓", "select") + "  ")
+	b.WriteString(style.KeyHint("enter", "run / drill down") + "  ")
 	b.WriteString(style.KeyHint("q", "back"))
-	return b.String()
+}
+
+func (m CompressConfigModel) viewProfilePick(b *strings.Builder) {
+	b.WriteString(style.StyleBody.Render("Select Profile:") + "\n\n")
+	for i, g := range m.groups {
+		prefix := "  "
+		if i == m.cursor {
+			prefix = style.StyleSelected.Render("▶ ")
+		}
+		b.WriteString(fmt.Sprintf("%s%-30s  %s\n",
+			prefix,
+			g.ProfileName,
+			style.StyleMuted.Render(fmt.Sprintf("(%d files)", len(g.Assets))),
+		))
+	}
+	b.WriteString("\n")
+	b.WriteString(style.KeyHint("↑↓", "select") + "  ")
+	b.WriteString(style.KeyHint("enter", "run") + "  ")
+	b.WriteString(style.KeyHint("esc", "back"))
+}
+
+func (m CompressConfigModel) viewModPick(b *strings.Builder) {
+	b.WriteString(style.StyleBody.Render("Select Mod:") + "\n\n")
+
+	pg := m.modPageSize()
+	offset := m.modOffset
+	end := offset + pg
+	if end > len(m.mods) {
+		end = len(m.mods)
+	}
+
+	if offset > 0 {
+		b.WriteString(style.StyleMuted.Render(fmt.Sprintf("  ↑ %d more\n", offset)))
+	}
+	for i := offset; i < end; i++ {
+		mod := m.mods[i]
+		prefix := "  "
+		if i == m.cursor {
+			prefix = style.StyleSelected.Render("▶ ")
+		}
+		count := 0
+		for _, g := range m.groups {
+			for _, a := range g.Assets {
+				if a.ModName == mod {
+					count++
+				}
+			}
+		}
+		b.WriteString(fmt.Sprintf("%s%-40s  %s\n",
+			prefix,
+			mod,
+			style.StyleMuted.Render(fmt.Sprintf("(%d files)", count)),
+		))
+	}
+	if end < len(m.mods) {
+		b.WriteString(style.StyleMuted.Render(fmt.Sprintf("  ↓ %d more\n", len(m.mods)-end)))
+	}
+
+	b.WriteString("\n")
+	b.WriteString(style.KeyHint("↑↓", "select") + "  ")
+	b.WriteString(style.KeyHint("enter", "run") + "  ")
+	b.WriteString(style.KeyHint("esc", "back"))
 }
 
 func (m *CompressConfigModel) SetSize(w, h int) {

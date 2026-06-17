@@ -97,6 +97,9 @@ func (m CompressModel) Update(msg tea.Msg) (CompressModel, tea.Cmd) {
 		} else {
 			m.failed++
 			errLine := fmt.Sprintf("%s: %v", filepath.Base(r.Asset.Path), r.Err)
+			if r.Stderr != "" {
+				errLine += "\n  " + strings.TrimSpace(r.Stderr)
+			}
 			m.errors = append(m.errors, errLine)
 			m.addLog(style.StyleDanger.Render("✗ ") + errLine)
 		}
