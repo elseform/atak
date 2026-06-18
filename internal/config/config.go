@@ -43,6 +43,11 @@ func configDir() (string, error) {
 	return filepath.Join(base, "stalker-tex"), nil
 }
 
+// ConfigDir returns the stalker-tex config directory path.
+func ConfigDir() (string, error) {
+	return configDir()
+}
+
 // Load reads config.json from the user config dir, returning defaults if absent.
 func Load() (*Config, error) {
 	dir, err := configDir()
@@ -97,29 +102,32 @@ func IsFirstRun() bool {
 }
 
 // LoadProfiles returns compression profiles, preferring user override if present.
-func LoadProfiles() ([]Profile, error) {
+// created is true when profiles.json was just written for the first time.
+func LoadProfiles() ([]Profile, bool, error) {
 	dir, err := configDir()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	userPath := filepath.Join(dir, "profiles.json")
 	data, err := os.ReadFile(userPath)
+	created := false
 	if errors.Is(err, os.ErrNotExist) {
 		if err := os.MkdirAll(dir, 0755); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		if err := os.WriteFile(userPath, defaultProfilesJSON, 0644); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		data = defaultProfilesJSON
+		created = true
 	} else if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	var pf profileFile
 	if err := json.Unmarshal(data, &pf); err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return pf.Profiles, nil
+	return pf.Profiles, created, nil
 }
 
 func defaultConfig() *Config {

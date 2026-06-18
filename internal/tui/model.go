@@ -6,8 +6,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/noisethanks/stalker-tex/internal/config"
 	"github.com/noisethanks/stalker-tex/internal/scan"
-	"github.com/noisethanks/stalker-tex/internal/tui/screens"
 	"github.com/noisethanks/stalker-tex/internal/tools"
+	"github.com/noisethanks/stalker-tex/internal/tui/screens"
 )
 
 // Screen identifies which screen is currently active.
@@ -15,6 +15,7 @@ type Screen int
 
 const (
 	ScreenWelcome Screen = iota
+	ScreenFirstRun
 	ScreenMenu
 	ScreenScan
 	ScreenResults
@@ -24,6 +25,7 @@ const (
 	ScreenBackup
 	ScreenRestore
 	ScreenSettings
+	ScreenAbout
 )
 
 // AppModel is the root Bubble Tea model. It owns shared state and delegates
@@ -32,6 +34,7 @@ type AppModel struct {
 	screen    Screen
 	cfg       *config.Config
 	tools     *tools.EmbeddedTools
+	version   string
 	cancelOp  context.CancelFunc
 	cancelMsg string
 	width     int
@@ -39,6 +42,8 @@ type AppModel struct {
 
 	// Screens.
 	welcome      screens.WelcomeModel
+	firstrun     screens.FirstRunModel
+	about        screens.AboutModel
 	menu         screens.MenuModel
 	scanScreen   screens.ScanModel
 	results      screens.ResultsModel
@@ -50,24 +55,32 @@ type AppModel struct {
 	settings     screens.SettingsModel
 }
 
-// New creates the root model. startScreen is ScreenWelcome on first run,
-// ScreenMenu when config already exists.
-func New(cfg *config.Config, t *tools.EmbeddedTools, firstRun bool) AppModel {
+// New creates the root model.
+// profilesCreated: show first-run profiles notice.
+// firstRun: show welcome/path-config screen.
+func New(cfg *config.Config, t *tools.EmbeddedTools, firstRun bool, profilesCreated bool, version string) AppModel {
 	startScreen := ScreenMenu
-	if firstRun {
+	switch {
+	case profilesCreated:
+		startScreen = ScreenFirstRun
+	case firstRun:
 		startScreen = ScreenWelcome
 	}
 	m := AppModel{
-		screen: startScreen,
-		cfg:    cfg,
-		tools:  t,
+		screen:  startScreen,
+		cfg:     cfg,
+		tools:   t,
+		version: version,
 	}
 	m.initScreens()
 	return m
 }
 
 func (m *AppModel) initScreens() {
+	cfgDir, _ := config.ConfigDir()
 	m.welcome = screens.NewWelcome(m.cfg)
+	m.firstrun = screens.NewFirstRun(cfgDir)
+	m.about = screens.NewAbout(m.version, tools.LicenseText)
 	m.menu = screens.NewMenu()
 	m.compConfig = screens.NewCompressConfig(screens.CompressConfigData{}, m.cfg)
 	m.backup = screens.NewBackup(m.cfg, m.tools)
@@ -124,6 +137,8 @@ func (m AppModel) View() string {
 	switch m.screen {
 	case ScreenWelcome:
 		return m.welcome.View()
+	case ScreenFirstRun:
+		return m.firstrun.View()
 	case ScreenMenu:
 		return m.menu.View()
 	case ScreenScan:
@@ -142,6 +157,8 @@ func (m AppModel) View() string {
 		return m.restore.View()
 	case ScreenSettings:
 		return m.settings.View()
+	case ScreenAbout:
+		return m.about.View()
 	default:
 		return ""
 	}
@@ -152,6 +169,8 @@ func (m AppModel) delegateUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch m.screen {
 	case ScreenWelcome:
 		m.welcome, cmd = m.welcome.Update(msg)
+	case ScreenFirstRun:
+		m.firstrun, cmd = m.firstrun.Update(msg)
 	case ScreenMenu:
 		m.menu, cmd = m.menu.Update(msg)
 	case ScreenScan:
@@ -170,6 +189,8 @@ func (m AppModel) delegateUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.restore, cmd = m.restore.Update(msg)
 	case ScreenSettings:
 		m.settings, cmd = m.settings.Update(msg)
+	case ScreenAbout:
+		m.about, cmd = m.about.Update(msg)
 	}
 	return m, cmd
 }
@@ -177,6 +198,7 @@ func (m AppModel) delegateUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m AppModel) propagateSize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 	// Forward size to every screen so they can adapt layout.
 	m.welcome.SetSize(msg.Width, msg.Height)
+	m.firstrun.SetSize(msg.Width, msg.Height)
 	m.menu.SetSize(msg.Width, msg.Height)
 	m.scanScreen.SetSize(msg.Width, msg.Height)
 	m.results.SetSize(msg.Width, msg.Height)
@@ -186,6 +208,7 @@ func (m AppModel) propagateSize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 	m.backup.SetSize(msg.Width, msg.Height)
 	m.restore.SetSize(msg.Width, msg.Height)
 	m.settings.SetSize(msg.Width, msg.Height)
+	m.about.SetSize(msg.Width, msg.Height)
 	return m, nil
 }
 
@@ -248,6 +271,12 @@ func (m AppModel) handleNavigate(msg screens.NavigateMsg) (tea.Model, tea.Cmd) {
 		m.settings = screens.NewSettings(m.cfg)
 		m.settings.SetSize(m.width, m.height)
 		return m, m.settings.Init()
+
+	case screens.NavAbout:
+		m.screen = ScreenAbout
+		m.about = screens.NewAbout(m.version, tools.LicenseText)
+		m.about.SetSize(m.width, m.height)
+		return m, m.about.Init()
 
 	case screens.NavSaveConfig:
 		if updated, ok := msg.Data.(*config.Config); ok {

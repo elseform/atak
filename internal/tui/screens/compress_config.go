@@ -127,7 +127,7 @@ func (m CompressConfigModel) buildJobs(scope int, selectedProfile, selectedMod s
 	groups := m.groups
 	cfg := m.cfg
 	return func() tea.Msg {
-		profiles, _ := config.LoadProfiles()
+		profiles, _, _ := config.LoadProfiles()
 		mipsFor := func(name string) bool {
 			for _, p := range profiles {
 				if p.Name == name {

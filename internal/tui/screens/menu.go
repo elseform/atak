@@ -18,6 +18,7 @@ var menuItems = []menuItem{
 	{label: "Backup Manager", desc: "Create, list, verify, and delete backups", nav: NavBackup},
 	{label: "Restore Mod", desc: "Extract a mod from a backup archive", nav: NavRestore},
 	{label: "Settings", desc: "Configure paths and worker threads", nav: NavSettings},
+	{label: "About", desc: "Version and third-party licenses", nav: NavAbout},
 	{label: "Quit", desc: "", nav: NavQuit},
 }
 

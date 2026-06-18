@@ -22,6 +22,7 @@ const (
 	NavBackup
 	NavRestore
 	NavSettings
+	NavAbout
 	NavSaveConfig
 	NavQuit
 )

@@ -80,8 +80,28 @@ This includes format selection, pattern matching, and mip generation. The binary
 knows how to read and apply profiles, not what they should contain.
 
 **First-run behavior:** if `profiles.json` does not exist in the config dir, the tool
-copies the embedded default to `~/.config/stalker-tex/profiles.json` and shows a notice
-telling the user where to find it. The user owns this file from that point forward.
+copies the embedded default to `~/.config/stalker-tex/profiles.json` and shows a
+one-time notice screen before proceeding to the main menu:
+
+```
+┌─────────────────────────────────────────────────────┐
+│  Compression profiles created                       │
+│                                                     │
+│  A default profiles.json has been created at:       │
+│  ~/.config/stalker-tex/profiles.json                │
+│                                                     │
+│  Edit this file to customize which textures get     │
+│  compressed and with which format. Changes take     │
+│  effect on the next scan.                           │
+│                                                     │
+│  Press any key to continue                          │
+└─────────────────────────────────────────────────────┘
+```
+
+This notice is shown exactly once — never again after the file exists.
+Implemented as a dedicated screen `internal/tui/screens/firstrun.go`.
+The user owns `profiles.json` from this point forward — the tool never
+overwrites it on subsequent launches.
 
 **The embedded default** (`configs/compression_profiles.json`) is the seed — it ships
 with broadly correct STALKER conventions but users are expected to tune it:
@@ -134,6 +154,7 @@ stalker-tex/
 ├── main.go
 ├── go.mod
 ├── go.sum
+├── SPEC.md
 ├── bin/
 │   ├── texconv
 │   └── 7zz
@@ -156,14 +177,16 @@ stalker-tex/
 │       ├── model.go         # top-level AppModel, screen enum, Init/Update/View
 │       ├── styles.go        # lipgloss theme (one place, no scattered styling)
 │       └── screens/
-│           ├── welcome.go   # path config, first-run detection
-│           ├── menu.go      # main menu hub
-│           ├── backup.go    # backup manager screen
-│           ├── restore.go   # mod picker + confirm + progress
-│           ├── scan.go      # scanning spinner + live counter
-│           ├── results.go   # scan results list, per-category breakdown
-│           ├── compress.go  # execution screen, progress bar, live log
-│           └── summary.go   # completion stats, error list, retry option
+│           ├── welcome.go      # path config, first-run detection
+│           ├── firstrun.go     # one-time profiles.json creation notice
+│           ├── menu.go         # main menu hub
+│           ├── about.go        # about + third-party licenses screen
+│           ├── backup.go       # backup manager screen
+│           ├── restore.go      # mod picker + confirm + progress
+│           ├── scan.go         # scanning spinner + live counter
+│           ├── results.go      # scan results list, per-category breakdown
+│           ├── compress.go     # execution screen, progress bar, live log
+│           └── summary.go      # completion stats, error list, retry option
 └── SPEC.md                  # this file
 ```
 
@@ -472,6 +495,42 @@ These must be followed consistently or the architecture drifts:
 
 ---
 
+## About / Licenses Screen
+
+Accessible from the main menu. Displays:
+
+```
+┌─────────────────────────────────────────────────────┐
+│  stalker-tex v<version>                             │
+│                                                     │
+│  A texture compression and backup utility for       │
+│  STALKER GAMMA modlists.                            │
+│                                                     │
+│  github.com/noisethanks/stalker-tex                 │
+│                                                     │
+│  ── Third-Party Licenses ──────────────────────     │
+│                                                     │
+│  <scrollable content of THIRD_PARTY_LICENSES.txt>  │
+│                                                     │
+│  ↑↓ scroll   q/esc back                            │
+└─────────────────────────────────────────────────────┘
+```
+
+Implementation notes:
+- Version string injected at build time via `-ldflags "-X main.version=v0.1.0"`
+- License content is hardcoded in `about.go` — no separate file embedding needed
+- All licenses displayed in one scrollable section in this order:
+  1. texconv (Texconv-Custom-DLL) — MIT + contents of THIRD_PARTY_LICENSES.txt
+  2. 7-Zip — LGPL v2.1
+  3. Charmbracelet UI dependencies (bubbletea, bubbles, lipgloss) — MIT
+- This satisfies matyalatte's redistribution requirement — license notice is
+  present in the distributed binary's about screen
+- License text is scrollable via `↑↓` / `j k`
+- `q` or `esc` returns to main menu
+- Implemented as `internal/tui/screens/about.go`
+
+---
+
 ## What This Is Not
 
 To keep maintenance footprint small, the following are explicitly out of scope:
@@ -483,6 +542,16 @@ To keep maintenance footprint small, the following are explicitly out of scope:
 - Support for archive formats other than 7z
 - Texture formats other than DDS input / BCn output
 - MO2 integration beyond reading the mods directory path
+
+---
+
+## Future / Post-1.0
+
+- **Atomic compression** — compress to staging directory, verify all files
+  succeeded, then diff-apply in one pass. Failed jobs leave the mod directory
+  untouched. Planned for v1.1.
+- **stalker-update** — separate binary, same visual identity, handles GAMMA
+  mod updates selectively. Dependent on community reception of stalker-tex.
 
 ---
 
@@ -505,13 +574,16 @@ No other external dependencies. Standard library only for everything else.
 go run ./main.go
 
 # Release — Linux x86-64, static
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o stalker-tex-linux ./main.go
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build   -ldflags="-s -w -X main.version=v0.1.0"   -o stalker-tex-linux ./main.go
 
 # Release — Windows x86-64
-CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o stalker-tex-windows.exe ./main.go
+CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build   -ldflags="-s -w -X main.version=v0.1.0"   -o stalker-tex-windows.exe ./main.go
 
-# goreleaser handles both targets in CI
+# goreleaser handles both targets in CI — version injected from git tag
 ```
+
+Version is injected at build time via `-X main.version=<tag>`. In development
+builds without the flag, version displays as `dev`.
 
 ## Build Targets
 

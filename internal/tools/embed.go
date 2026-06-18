@@ -1,10 +1,14 @@
 package tools
 
 import (
+	_ "embed"
 	"fmt"
 	"os"
 	"runtime"
 )
+
+//go:embed bin/THIRD_PARTY_LICENSES.txt
+var LicenseText []byte
 
 // EmbeddedTools holds paths to extracted binaries for the current session.
 type EmbeddedTools struct {

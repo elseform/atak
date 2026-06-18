@@ -10,6 +10,8 @@ import (
 	"github.com/noisethanks/stalker-tex/internal/tui"
 )
 
+var version = "dev"
+
 func main() {
 	t, err := tools.Extract()
 	if err != nil {
@@ -26,7 +28,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	m := tui.New(cfg, t, firstRun)
+	_, profilesCreated, err := config.LoadProfiles()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "stalker-tex: failed to load profiles: %v\n", err)
+		os.Exit(1)
+	}
+
+	m := tui.New(cfg, t, firstRun, profilesCreated, version)
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "stalker-tex: %v\n", err)

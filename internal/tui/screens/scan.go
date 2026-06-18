@@ -56,7 +56,7 @@ func (m ScanModel) startScan() tea.Cmd {
 	modsDir := m.cfg.ModsDir
 	ctx := m.ctx
 	return func() tea.Msg {
-		profiles, err := config.LoadProfiles()
+		profiles, _, err := config.LoadProfiles()
 		if err != nil || len(profiles) == 0 {
 			return scanCompleteMsg{total: 0}
 		}
