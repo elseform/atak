@@ -268,15 +268,16 @@ Summary
 
 ### 1. Backup Manager
 
-All archive operations live in one screen — the user selects an archive once
-and all operations on it are available in place. No separate Restore screen.
+All archive operations live in one screen. No separate Restore screen.
 
 ```
 ┌─────────────────────────────────────────────────────┐
 │  Backup Manager                                     │
 │                                                     │
-│  Archive: ~/gamma/backup/gamma_backup.7z            │
-│  Size: 50GB  •  Created: 2 days ago                 │
+│  Backups in ~/gamma/backup/:                        │
+│                                                     │
+│  gamma_backup.7z        50.2 GB   Jun 08 14:23      │
+│  gamma_backup_old.7z    48.7 GB   May 15 09:41      │
 │                                                     │
 │  > Create New Backup                                │
 │    Restore Single Mod                               │
@@ -286,12 +287,31 @@ and all operations on it are available in place. No separate Restore screen.
 └─────────────────────────────────────────────────────┘
 ```
 
-- **Restore Single Mod** — launches the shared `ModPicker` component to select
-  a mod, then runs restore via the shared `OperationScreen` component
-- **Restore All** — confirmation dialog, then full restore via `OperationScreen`
+**Backup list:**
+- Scan backup directory with `os.ReadDir` on screen init, filter for `*.7z` files
+- Stat each file for size and modification time — no 7z invocation needed
+- Display filename, human-readable size, and date above the action menu
+- If no backups exist show "No backups found" in that section
+- Refresh list after Create New Backup or Delete completes
+
+**Archive selection:**
+- When user selects any option except Create New Backup:
+  - If only one archive exists — auto-select it, proceed directly
+  - If multiple archives exist — show a picker to select which to operate on
+
+**Actions:**
+- **Create New Backup** — runs compression via shared `OperationScreen`, no
+  archive selection needed
+- **Restore Single Mod** — archive picker (if needed) → `ModPicker` component
+  → confirm → restore via `OperationScreen`
+- **Restore All** — archive picker (if needed) → confirmation dialog with
+  warning → full restore via `OperationScreen`
+- **Verify Archive** — archive picker (if needed) → verify via `OperationScreen`
+- **Delete Backup** — archive picker (if needed) → confirmation → `os.Remove`
+
 - The separate `internal/tui/screens/restore.go` is removed — all restore
   functionality lives in `backup.go`. The `ModPicker` component is reused.
-- Main menu has three items: Scan & Compress, Backup Manager, Settings
+- Main menu has four items: Scan & Compress, Backup Manager, Settings, About
 
 - List existing backups in the GAMMA directory archive with size and date
 - Create a new LZMA solid archive of the full GAMMA mods directory via:

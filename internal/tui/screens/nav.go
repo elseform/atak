@@ -20,7 +20,6 @@ const (
 	NavCompress
 	NavSummary
 	NavBackup
-	NavRestore
 	NavSettings
 	NavAbout
 	NavSaveConfig

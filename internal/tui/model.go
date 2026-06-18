@@ -22,7 +22,6 @@ const (
 	ScreenCompress
 	ScreenSummary
 	ScreenBackup
-	ScreenRestore
 	ScreenSettings
 	ScreenAbout
 )
@@ -50,7 +49,6 @@ type AppModel struct {
 	compress     screens.CompressModel
 	summary      screens.SummaryModel
 	backup       screens.BackupModel
-	restore      screens.RestoreModel
 	settings     screens.SettingsModel
 }
 
@@ -83,7 +81,6 @@ func (m *AppModel) initScreens() {
 	m.menu = screens.NewMenu()
 	m.compConfig = screens.NewCompressConfig(screens.CompressConfigData{}, m.cfg)
 	m.backup = screens.NewBackup(m.cfg, m.tools)
-	m.restore = screens.NewRestore(m.cfg, m.tools)
 	m.settings = screens.NewSettings(m.cfg)
 }
 
@@ -152,8 +149,6 @@ func (m AppModel) View() string {
 		return m.summary.View()
 	case ScreenBackup:
 		return m.backup.View()
-	case ScreenRestore:
-		return m.restore.View()
 	case ScreenSettings:
 		return m.settings.View()
 	case ScreenAbout:
@@ -184,8 +179,6 @@ func (m AppModel) delegateUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.summary, cmd = m.summary.Update(msg)
 	case ScreenBackup:
 		m.backup, cmd = m.backup.Update(msg)
-	case ScreenRestore:
-		m.restore, cmd = m.restore.Update(msg)
 	case ScreenSettings:
 		m.settings, cmd = m.settings.Update(msg)
 	case ScreenAbout:
@@ -205,7 +198,6 @@ func (m AppModel) propagateSize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 	m.compress.SetSize(msg.Width, msg.Height)
 	m.summary.SetSize(msg.Width, msg.Height)
 	m.backup.SetSize(msg.Width, msg.Height)
-	m.restore.SetSize(msg.Width, msg.Height)
 	m.settings.SetSize(msg.Width, msg.Height)
 	m.about.SetSize(msg.Width, msg.Height)
 	return m, nil
@@ -258,12 +250,6 @@ func (m AppModel) handleNavigate(msg screens.NavigateMsg) (tea.Model, tea.Cmd) {
 		m.backup = screens.NewBackup(m.cfg, m.tools)
 		m.backup.SetSize(m.width, m.height)
 		return m, m.backup.Init()
-
-	case screens.NavRestore:
-		m.screen = ScreenRestore
-		m.restore = screens.NewRestore(m.cfg, m.tools)
-		m.restore.SetSize(m.width, m.height)
-		return m, m.restore.Init()
 
 	case screens.NavSettings:
 		m.screen = ScreenSettings

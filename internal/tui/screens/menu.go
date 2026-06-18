@@ -15,8 +15,7 @@ type menuItem struct {
 
 var menuItems = []menuItem{
 	{label: "Scan & Compress", desc: "Walk mods dir, identify and compress textures", nav: NavScan},
-	{label: "Backup Manager", desc: "Create, list, verify, and delete backups", nav: NavBackup},
-	{label: "Restore Mod", desc: "Extract a mod from a backup archive", nav: NavRestore},
+	{label: "Backup Manager", desc: "Create, restore, verify, and delete backups", nav: NavBackup},
 	{label: "Settings", desc: "Configure paths and worker threads", nav: NavSettings},
 	{label: "About", desc: "Version and third-party licenses", nav: NavAbout},
 	{label: "Quit", desc: "", nav: NavQuit},

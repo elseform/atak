@@ -148,6 +148,47 @@ func Restore(ctx context.Context, sevenZipPath, archivePath, modName, modDir str
 	return progress, done
 }
 
+// RestoreAll extracts the entire archive to modsParentDir (the directory containing the mods folder).
+func RestoreAll(ctx context.Context, sevenZipPath, archivePath, modsParentDir string) (<-chan ProgressMsg, <-chan error) {
+	progress := make(chan ProgressMsg, 32)
+	done := make(chan error, 1)
+
+	go func() {
+		defer close(progress)
+		defer close(done)
+
+		args := []string{
+			"x", archivePath,
+			"-o" + modsParentDir,
+			"-r",
+			"-y",
+			"-bsp1",
+		}
+		cmd := exec.CommandContext(ctx, sevenZipPath, args...)
+		stderr, err := cmd.StderrPipe()
+		if err != nil {
+			done <- err
+			return
+		}
+		if err := cmd.Start(); err != nil {
+			done <- err
+			return
+		}
+
+		scanner := bufio.NewScanner(stderr)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if pct, file, ok := parseProgress(line); ok {
+				progress <- ProgressMsg{Percent: pct, CurrentFile: file}
+			}
+		}
+
+		done <- cmd.Wait()
+	}()
+
+	return progress, done
+}
+
 // ListMods parses `7zz l -slt` output and returns unique mod names from the archive.
 // Uses technical listing format (one property per line) to handle spaces in paths
 // and mods without explicit directory entries.
