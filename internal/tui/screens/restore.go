@@ -1,6 +1,7 @@
 package screens
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,13 +9,12 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/noisethanks/stalker-tex/internal/archive"
 	"github.com/noisethanks/stalker-tex/internal/config"
 	"github.com/noisethanks/stalker-tex/internal/tools"
+	"github.com/noisethanks/stalker-tex/internal/tui/components"
 	"github.com/noisethanks/stalker-tex/internal/tui/style"
 )
 
@@ -42,12 +42,6 @@ type restoreTickMsg struct {
 type restoreFinishedMsg struct{ err error }
 type restoreSizeMsg struct{ bytes int64 }
 
-type modItem struct{ name string }
-
-func (i modItem) Title() string       { return i.name }
-func (i modItem) Description() string { return "" }
-func (i modItem) FilterValue() string { return i.name }
-
 // RestoreModel handles archive selection, mod search, confirm, and progress.
 type RestoreModel struct {
 	cfg         *config.Config
@@ -55,7 +49,7 @@ type RestoreModel struct {
 	state       restoreState
 	backups     []archive.BackupInfo
 	backupCur   int
-	modList     list.Model
+	modPicker   components.ModPicker
 	selectedMod string
 	selectedBak archive.BackupInfo
 	bar         progress.Model
@@ -70,25 +64,15 @@ type RestoreModel struct {
 }
 
 func NewRestore(cfg *config.Config, t *tools.EmbeddedTools) RestoreModel {
-	delegate := list.NewDefaultDelegate()
-	delegate.SetHeight(1)
-	delegate.SetSpacing(0)
-	delegate.ShowDescription = false
-	delegate.Styles.SelectedTitle = delegate.Styles.SelectedTitle.Foreground(lipgloss.Color("#E8A020"))
-	l := list.New(nil, delegate, 60, 20)
-	l.SetShowTitle(false)
-	l.SetShowStatusBar(false)
-	l.SetShowHelp(false)
-	l.SetFilteringEnabled(true)
 	bar := progress.New(progress.WithDefaultGradient())
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
 	return RestoreModel{
-		cfg:     cfg,
-		tools:   t,
-		modList: l,
-		bar:     bar,
-		spinner: sp,
+		cfg:       cfg,
+		tools:     t,
+		modPicker: components.NewModPicker(nil, 60, 20),
+		bar:       bar,
+		spinner:   sp,
 	}
 }
 
@@ -111,11 +95,7 @@ func (m RestoreModel) Update(msg tea.Msg) (RestoreModel, tea.Cmd) {
 		return m, nil
 
 	case modsListedMsg:
-		items := make([]list.Item, len(msg.mods))
-		for i, name := range msg.mods {
-			items[i] = modItem{name: name}
-		}
-		m.modList.SetItems(items)
+		m.modPicker = components.NewModPicker(msg.mods, m.width-4, m.height-3)
 		m.selectedBak = archive.BackupInfo{
 			Name: msg.backupName,
 			Path: msg.backupPath,
@@ -127,6 +107,15 @@ func (m RestoreModel) Update(msg tea.Msg) (RestoreModel, tea.Cmd) {
 			}
 		}
 		m.state = restoreStatePickMod
+		return m, nil
+
+	case components.ModSelectedMsg:
+		m.selectedMod = msg.Mod
+		m.state = restoreStateConfirm
+		return m, nil
+
+	case components.ModPickerCancelledMsg:
+		m.state = restoreStatePickArchive
 		return m, nil
 
 	case spinner.TickMsg:
@@ -168,12 +157,17 @@ func (m RestoreModel) Update(msg tea.Msg) (RestoreModel, tea.Cmd) {
 		return m, cmd
 
 	case tea.KeyMsg:
+		if m.state == restoreStatePickMod {
+			var cmd tea.Cmd
+			m.modPicker, cmd = m.modPicker.Update(msg)
+			return m, cmd
+		}
 		return m.handleKey(msg)
 	}
 
 	if m.state == restoreStatePickMod {
 		var cmd tea.Cmd
-		m.modList, cmd = m.modList.Update(msg)
+		m.modPicker, cmd = m.modPicker.Update(msg)
 		return m, cmd
 	}
 	return m, nil
@@ -208,22 +202,6 @@ func (m RestoreModel) handleKey(msg tea.KeyMsg) (RestoreModel, tea.Cmd) {
 			return m, func() tea.Msg { return NavigateMsg{To: NavMenu} }
 		}
 
-	case restoreStatePickMod:
-		if msg.String() == "enter" {
-			if sel := m.modList.SelectedItem(); sel != nil {
-				m.selectedMod = sel.(modItem).name
-				m.state = restoreStateConfirm
-				return m, nil
-			}
-		}
-		if msg.String() == "esc" {
-			m.state = restoreStatePickArchive
-			return m, nil
-		}
-		var cmd tea.Cmd
-		m.modList, cmd = m.modList.Update(msg)
-		return m, cmd
-
 	case restoreStateConfirm:
 		switch msg.String() {
 		case "y", "enter":
@@ -239,6 +217,7 @@ func (m RestoreModel) handleKey(msg tea.KeyMsg) (RestoreModel, tea.Cmd) {
 }
 
 func (m RestoreModel) startRestore() (RestoreModel, tea.Cmd) {
+	ctx, cancel := context.WithCancel(context.Background())
 	m.state = restoreStateRunning
 	m.curPct = 0
 	m.restoreSize = 0
@@ -248,10 +227,11 @@ func (m RestoreModel) startRestore() (RestoreModel, tea.Cmd) {
 	modDir := m.cfg.ModsDir
 
 	return m, tea.Batch(
+		func() tea.Msg { return OperationStartedMsg{Cancel: cancel} },
 		m.spinner.Tick,
 		pollRestoreSize(filepath.Join(modDir, modName)),
 		func() tea.Msg {
-			progCh, doneCh := archive.Restore(szPath, archivePath, modName, modDir)
+			progCh, doneCh := archive.Restore(ctx, szPath, archivePath, modName, modDir)
 			return readRestoreProgress(progCh, doneCh)
 		},
 	)
@@ -308,7 +288,7 @@ func (m RestoreModel) View() string {
 
 	case restoreStatePickMod:
 		b.WriteString(style.StyleMuted.Render("Archive: "+m.selectedBak.Name) + "\n")
-		b.WriteString(m.modList.View())
+		b.WriteString(m.modPicker.View())
 		b.WriteString(style.KeyHint("enter", "select") + "  " + style.KeyHint("esc", "back"))
 
 	case restoreStateConfirm:
@@ -343,6 +323,6 @@ func (m RestoreModel) View() string {
 func (m *RestoreModel) SetSize(w, h int) {
 	m.width = w
 	m.height = h
-	m.modList.SetSize(w-4, h-3)
+	m.modPicker.SetSize(w-4, h-3)
 	m.bar.Width = w - 4
 }

@@ -1,6 +1,7 @@
 package screens
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -29,6 +30,8 @@ type CompressModel struct {
 	cfg         *config.Config
 	tools       *tools.EmbeddedTools
 	progress    progress.Model
+	ctx         context.Context
+	cancel      context.CancelFunc
 	total       int
 	done        int
 	succeeded   int
@@ -46,6 +49,7 @@ type CompressModel struct {
 const maxLogLines = 6
 
 func NewCompress(data CompressJobData, cfg *config.Config, t *tools.EmbeddedTools) CompressModel {
+	ctx, cancel := context.WithCancel(context.Background())
 	total := 0
 	for _, g := range data.Groups {
 		total += len(g.Paths)
@@ -56,21 +60,27 @@ func NewCompress(data CompressJobData, cfg *config.Config, t *tools.EmbeddedTool
 		cfg:      cfg,
 		tools:    t,
 		progress: bar,
+		ctx:      ctx,
+		cancel:   cancel,
 		total:    total,
 	}
 }
 
 func (m CompressModel) Init() tea.Cmd {
-	return m.startCompression()
+	return tea.Batch(
+		func() tea.Msg { return OperationStartedMsg{Cancel: m.cancel} },
+		m.startCompression(),
+	)
 }
 
 func (m CompressModel) startCompression() tea.Cmd {
 	data := m.data
 	texconvPath := m.tools.TexconvPath
 	cfg := m.cfg
+	ctx := m.ctx
 	return func() tea.Msg {
 		jobs := buildJobs(data, cfg)
-		ch := compress.RunPool(texconvPath, jobs, data.WorkerCount, cfg)
+		ch := compress.RunPool(ctx, texconvPath, jobs, data.WorkerCount, cfg)
 		return readNextResult(ch)
 	}
 }

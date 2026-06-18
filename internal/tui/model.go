@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"context"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/noisethanks/stalker-tex/internal/config"
 	"github.com/noisethanks/stalker-tex/internal/scan"
@@ -27,11 +29,13 @@ const (
 // AppModel is the root Bubble Tea model. It owns shared state and delegates
 // Update/View to the active sub-screen model.
 type AppModel struct {
-	screen  Screen
-	cfg     *config.Config
-	tools   *tools.EmbeddedTools
-	width   int
-	height  int
+	screen    Screen
+	cfg       *config.Config
+	tools     *tools.EmbeddedTools
+	cancelOp  context.CancelFunc
+	cancelMsg string
+	width     int
+	height    int
 
 	// Screens.
 	welcome      screens.WelcomeModel
@@ -65,6 +69,7 @@ func New(cfg *config.Config, t *tools.EmbeddedTools, firstRun bool) AppModel {
 func (m *AppModel) initScreens() {
 	m.welcome = screens.NewWelcome(m.cfg)
 	m.menu = screens.NewMenu()
+	m.compConfig = screens.NewCompressConfig(screens.CompressConfigData{}, m.cfg)
 	m.backup = screens.NewBackup(m.cfg, m.tools)
 	m.restore = screens.NewRestore(m.cfg, m.tools)
 	m.settings = screens.NewSettings(m.cfg)
@@ -88,8 +93,28 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		return m.propagateSize(msg)
 
+	case tea.KeyMsg:
+		if msg.String() == "ctrl+c" {
+			if m.cancelOp != nil {
+				m.cancelOp()
+				m.cancelOp = nil
+				m.screen = ScreenMenu
+				m.menu = screens.NewMenuWithStatus(m.cancelMsg)
+				return m, m.menu.Init()
+			}
+			return m, tea.Quit
+		}
+
 	case screens.NavigateMsg:
 		return m.handleNavigate(msg)
+
+	case screens.OperationStartedMsg:
+		m.cancelOp = msg.Cancel
+		m.cancelMsg = msg.CancelMsg
+		if m.cancelMsg == "" {
+			m.cancelMsg = "Operation cancelled"
+		}
+		return m, nil
 	}
 
 	return m.delegateUpdate(msg)
@@ -165,6 +190,7 @@ func (m AppModel) propagateSize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m AppModel) handleNavigate(msg screens.NavigateMsg) (tea.Model, tea.Cmd) {
+	m.cancelOp = nil
 	switch msg.To {
 	case screens.NavMenu:
 		m.screen = ScreenMenu

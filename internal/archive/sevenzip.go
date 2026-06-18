@@ -2,6 +2,7 @@ package archive
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -56,7 +57,7 @@ func ListBackups(backupDir string) ([]BackupInfo, error) {
 // Backup creates a solid LZMA2 archive of modsDir at outputPath.
 // Progress is sent on the returned channel (closed on completion).
 // The error channel receives a single value (nil or error) when done.
-func Backup(sevenZipPath, modsDir, outputPath string) (<-chan ProgressMsg, <-chan error) {
+func Backup(ctx context.Context, sevenZipPath, modsDir, outputPath string, backupLevel int) (<-chan ProgressMsg, <-chan error) {
 	progress := make(chan ProgressMsg, 32)
 	done := make(chan error, 1)
 
@@ -66,14 +67,14 @@ func Backup(sevenZipPath, modsDir, outputPath string) (<-chan ProgressMsg, <-cha
 
 		args := []string{
 			"a", "-t7z",
-			"-m0=lzma2", "-mx=6", "-mfb=64", "-md=32m", "-ms=on",
+			"-m0=lzma2", fmt.Sprintf("-mx=%d", backupLevel), "-mfb=64", "-md=32m", "-ms=on",
 			"-bsp1",
 			outputPath,
 			modsDir,
 			"-xr!downloads",
 			"-xr!Downloads",
 		}
-		cmd := exec.Command(sevenZipPath, args...)
+		cmd := exec.CommandContext(ctx, sevenZipPath, args...)
 		stderr, err := cmd.StderrPipe()
 		if err != nil {
 			done <- err
@@ -92,7 +93,13 @@ func Backup(sevenZipPath, modsDir, outputPath string) (<-chan ProgressMsg, <-cha
 			}
 		}
 
-		done <- cmd.Wait()
+		err = cmd.Wait()
+		if ctx.Err() != nil {
+			os.Remove(outputPath)
+			done <- ctx.Err()
+			return
+		}
+		done <- err
 	}()
 
 	return progress, done
@@ -100,7 +107,7 @@ func Backup(sevenZipPath, modsDir, outputPath string) (<-chan ProgressMsg, <-cha
 
 // Restore extracts a single mod from archive to modDir.
 // Progress is sent on the returned channel; error on done channel when complete.
-func Restore(sevenZipPath, archivePath, modName, modDir string) (<-chan ProgressMsg, <-chan error) {
+func Restore(ctx context.Context, sevenZipPath, archivePath, modName, modDir string) (<-chan ProgressMsg, <-chan error) {
 	progress := make(chan ProgressMsg, 32)
 	done := make(chan error, 1)
 
@@ -116,7 +123,7 @@ func Restore(sevenZipPath, archivePath, modName, modDir string) (<-chan Progress
 			"-y",
 			"-bsp1",
 		}
-		cmd := exec.Command(sevenZipPath, args...)
+		cmd := exec.CommandContext(ctx, sevenZipPath, args...)
 		stderr, err := cmd.StderrPipe()
 		if err != nil {
 			done <- err

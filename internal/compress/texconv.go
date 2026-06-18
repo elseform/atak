@@ -2,6 +2,7 @@ package compress
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -22,7 +23,7 @@ type CompressionResult struct {
 
 // Run invokes texconv on a single asset and returns the result.
 // outputDir should be filepath.Dir(asset.Path) for in-place compression.
-func Run(texconvPath string, asset scan.Asset, format string, generateMips bool, outputDir string) CompressionResult {
+func Run(ctx context.Context, texconvPath string, asset scan.Asset, format string, generateMips bool, outputDir string) CompressionResult {
 	before, _ := fileSize(asset.Path)
 
 	args := []string{
@@ -40,11 +41,16 @@ func Run(texconvPath string, asset scan.Asset, format string, generateMips bool,
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
 		return CompressionResult{Asset: asset, Success: false, Err: err}
 	}
-	cmd := exec.Command(texconvPath, args...)
+	cmd := exec.CommandContext(ctx, texconvPath, args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
 	err := cmd.Run()
+	if ctx.Err() != nil {
+		outPath := filepath.Join(outputDir, filepath.Base(asset.Path))
+		os.Remove(outPath)
+		return CompressionResult{Asset: asset, Success: false, Err: ctx.Err()}
+	}
 	if err != nil {
 		return CompressionResult{
 			Asset:   asset,

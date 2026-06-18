@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/noisethanks/stalker-tex/internal/config"
+	"github.com/noisethanks/stalker-tex/internal/tui/components"
 	"github.com/noisethanks/stalker-tex/internal/tui/style"
 )
 
@@ -17,7 +18,7 @@ type CompressConfigModel struct {
 	mods      []string // unique mod names, sorted alphabetically
 	mode      int      // 0=scope-select  1=profile-pick  2=mod-pick
 	cursor    int
-	modOffset int // first visible row in mod-pick viewport
+	modPicker components.ModPicker
 	cfg       *config.Config
 	width     int
 	height    int
@@ -36,9 +37,10 @@ func NewCompressConfig(data CompressConfigData, cfg *config.Config) CompressConf
 	}
 	sort.Strings(mods)
 	return CompressConfigModel{
-		groups: data.Groups,
-		mods:   mods,
-		cfg:    cfg,
+		groups:    data.Groups,
+		mods:      mods,
+		cfg:       cfg,
+		modPicker: components.NewModPicker(mods, 0, 0),
 	}
 }
 
@@ -46,8 +48,23 @@ func (m CompressConfigModel) Init() tea.Cmd { return nil }
 
 func (m CompressConfigModel) Update(msg tea.Msg) (CompressConfigModel, tea.Cmd) {
 	switch msg := msg.(type) {
+	case components.ModSelectedMsg:
+		return m, m.buildJobs(2, "", msg.Mod)
+
+	case components.ModPickerCancelledMsg:
+		m.mode = 0
+		m.cursor = 2
+		return m, nil
+
 	case tea.KeyMsg:
-		return m.handleKey(msg.String())
+		if m.mode != 2 {
+			return m.handleKey(msg.String())
+		}
+	}
+	if m.mode == 2 {
+		var cmd tea.Cmd
+		m.modPicker, cmd = m.modPicker.Update(msg)
+		return m, cmd
 	}
 	return m, nil
 }
@@ -76,8 +93,7 @@ func (m CompressConfigModel) handleKey(key string) (CompressConfigModel, tea.Cmd
 			case 2:
 				if len(m.mods) > 0 {
 					m.mode = 2
-					m.cursor = 0
-					m.modOffset = 0
+					m.modPicker = components.NewModPicker(m.mods, m.width-4, max(5, m.height-8))
 				}
 			}
 		case "esc", "q":
@@ -103,32 +119,6 @@ func (m CompressConfigModel) handleKey(key string) (CompressConfigModel, tea.Cmd
 			m.cursor = 1
 		}
 
-	case 2: // mod pick
-		pg := m.modPageSize()
-		switch key {
-		case "up", "k":
-			if m.cursor > 0 {
-				m.cursor--
-				if m.cursor < m.modOffset {
-					m.modOffset = m.cursor
-				}
-			}
-		case "down", "j":
-			if m.cursor < len(m.mods)-1 {
-				m.cursor++
-				if m.cursor >= m.modOffset+pg {
-					m.modOffset = m.cursor - pg + 1
-				}
-			}
-		case "enter":
-			if len(m.mods) > 0 {
-				return m, m.buildJobs(2, "", m.mods[m.cursor])
-			}
-		case "esc":
-			m.mode = 0
-			m.cursor = 2
-			m.modOffset = 0
-		}
 	}
 	return m, nil
 }
@@ -202,14 +192,6 @@ func (m CompressConfigModel) buildJobs(scope int, selectedProfile, selectedMod s
 			},
 		}
 	}
-}
-
-func (m CompressConfigModel) modPageSize() int {
-	// Chrome: title(1) + blank(1) + summary(1) + blank(1) + header(1) + blank(1) + hints(1) = 7
-	if m.height <= 7 {
-		return 5
-	}
-	return m.height - 7
 }
 
 func (m CompressConfigModel) totalFiles() int {
@@ -297,43 +279,9 @@ func (m CompressConfigModel) viewProfilePick(b *strings.Builder) {
 
 func (m CompressConfigModel) viewModPick(b *strings.Builder) {
 	b.WriteString(style.StyleBody.Render("Select Mod:") + "\n\n")
-
-	pg := m.modPageSize()
-	offset := m.modOffset
-	end := offset + pg
-	if end > len(m.mods) {
-		end = len(m.mods)
-	}
-
-	if offset > 0 {
-		b.WriteString(style.StyleMuted.Render(fmt.Sprintf("  ↑ %d more\n", offset)))
-	}
-	for i := offset; i < end; i++ {
-		mod := m.mods[i]
-		prefix := "  "
-		if i == m.cursor {
-			prefix = style.StyleSelected.Render("▶ ")
-		}
-		count := 0
-		for _, g := range m.groups {
-			for _, a := range g.Assets {
-				if a.ModName == mod {
-					count++
-				}
-			}
-		}
-		b.WriteString(fmt.Sprintf("%s%-40s  %s\n",
-			prefix,
-			mod,
-			style.StyleMuted.Render(fmt.Sprintf("(%d files)", count)),
-		))
-	}
-	if end < len(m.mods) {
-		b.WriteString(style.StyleMuted.Render(fmt.Sprintf("  ↓ %d more\n", len(m.mods)-end)))
-	}
-
+	b.WriteString(fmt.Sprintf("DEBUG: %d mods, %d groups\n", len(m.mods), len(m.groups)))
+	b.WriteString(m.modPicker.View())
 	b.WriteString("\n")
-	b.WriteString(style.KeyHint("↑↓", "select") + "  ")
 	b.WriteString(style.KeyHint("enter", "run") + "  ")
 	b.WriteString(style.KeyHint("esc", "back"))
 }
@@ -341,4 +289,5 @@ func (m CompressConfigModel) viewModPick(b *strings.Builder) {
 func (m *CompressConfigModel) SetSize(w, h int) {
 	m.width = w
 	m.height = h
+	m.modPicker.SetSize(w-4, max(5, h-8))
 }

@@ -1,6 +1,7 @@
 package compress
 
 import (
+	"context"
 	"path/filepath"
 	"sync"
 
@@ -18,7 +19,7 @@ type Job struct {
 
 // RunPool executes jobs concurrently using workerCount goroutines.
 // Results are sent to the returned channel, which is closed when all jobs complete.
-func RunPool(texconvPath string, jobs []Job, workerCount int, cfg *config.Config) <-chan CompressionResult {
+func RunPool(ctx context.Context, texconvPath string, jobs []Job, workerCount int, cfg *config.Config) <-chan CompressionResult {
 	results := make(chan CompressionResult, len(jobs))
 	work := make(chan Job, len(jobs))
 
@@ -33,11 +34,16 @@ func RunPool(texconvPath string, jobs []Job, workerCount int, cfg *config.Config
 		go func() {
 			defer wg.Done()
 			for job := range work {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
 				outDir := job.OutputDir
 				if outDir == "" {
 					outDir = outputDir(job.Asset, cfg)
 				}
-				results <- Run(texconvPath, job.Asset, job.Format, job.GenerateMips, outDir)
+				results <- Run(ctx, texconvPath, job.Asset, job.Format, job.GenerateMips, outDir)
 			}
 		}()
 	}

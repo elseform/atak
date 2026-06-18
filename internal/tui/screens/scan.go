@@ -1,6 +1,7 @@
 package screens
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -26,6 +27,8 @@ type ScanModel struct {
 	cfg     *config.Config
 	tools   *tools.EmbeddedTools
 	spinner spinner.Model
+	ctx     context.Context
+	cancel  context.CancelFunc
 	assets  []scan.Asset
 	found   int
 	done    bool
@@ -35,33 +38,44 @@ type ScanModel struct {
 }
 
 func NewScan(cfg *config.Config, t *tools.EmbeddedTools) ScanModel {
+	ctx, cancel := context.WithCancel(context.Background())
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
-	return ScanModel{cfg: cfg, tools: t, spinner: sp}
+	return ScanModel{cfg: cfg, tools: t, spinner: sp, ctx: ctx, cancel: cancel}
 }
 
 func (m ScanModel) Init() tea.Cmd {
-	return tea.Batch(m.spinner.Tick, m.startScan())
+	return tea.Batch(
+		func() tea.Msg { return OperationStartedMsg{Cancel: m.cancel, CancelMsg: "Scan cancelled"} },
+		m.spinner.Tick,
+		m.startScan(),
+	)
 }
 
 func (m ScanModel) startScan() tea.Cmd {
 	modsDir := m.cfg.ModsDir
+	ctx := m.ctx
 	return func() tea.Msg {
 		profiles, err := config.LoadProfiles()
 		if err != nil || len(profiles) == 0 {
 			return scanCompleteMsg{total: 0}
 		}
 		ch, _ := scan.Walk(modsDir, profiles, m.cfg.ScanExclusions)
-		return readNextAsset(ch)
+		return readNextAsset(ctx, ch)
 	}
 }
 
-func readNextAsset(ch <-chan scan.Asset) tea.Msg {
-	asset, ok := <-ch
-	if !ok {
+func readNextAsset(ctx context.Context, ch <-chan scan.Asset) tea.Msg {
+	select {
+	case <-ctx.Done():
+		go func() { for range ch {} }() // drain so walker goroutine exits
 		return scanCompleteMsg{}
+	case asset, ok := <-ch:
+		if !ok {
+			return scanCompleteMsg{}
+		}
+		return assetFoundMsg{asset: asset, ch: ch}
 	}
-	return assetFoundMsg{asset: asset, ch: ch}
 }
 
 func (m ScanModel) Update(msg tea.Msg) (ScanModel, tea.Cmd) {
@@ -75,7 +89,8 @@ func (m ScanModel) Update(msg tea.Msg) (ScanModel, tea.Cmd) {
 		m.assets = append(m.assets, msg.asset)
 		m.found++
 		ch := msg.ch
-		return m, func() tea.Msg { return readNextAsset(ch) }
+		ctx := m.ctx
+		return m, func() tea.Msg { return readNextAsset(ctx, ch) }
 
 	case scanCompleteMsg:
 		m.done = true

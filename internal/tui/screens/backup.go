@@ -1,6 +1,7 @@
 package screens
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -192,6 +193,7 @@ func (m BackupModel) handleKey(key string) (BackupModel, tea.Cmd) {
 }
 
 func (m BackupModel) startBackup() (BackupModel, tea.Cmd) {
+	ctx, cancel := context.WithCancel(context.Background())
 	m.state = backupStateCreating
 	m.curPct = 0
 	m.archiveSize = 0
@@ -202,10 +204,11 @@ func (m BackupModel) startBackup() (BackupModel, tea.Cmd) {
 	m.outPath = outPath
 
 	return m, tea.Batch(
+		func() tea.Msg { return OperationStartedMsg{Cancel: cancel} },
 		m.spinner.Tick,
 		pollBackupSize(outPath),
 		func() tea.Msg {
-			progCh, doneCh := archive.Backup(szPath, modsDir, outPath)
+			progCh, doneCh := archive.Backup(ctx, szPath, modsDir, outPath, m.cfg.BackupLevel)
 			return readArchiveProgress(progCh, doneCh)
 		},
 	)

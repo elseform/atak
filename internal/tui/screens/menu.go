@@ -23,13 +23,18 @@ var menuItems = []menuItem{
 
 // MenuModel is the main hub screen.
 type MenuModel struct {
-	cursor int
-	width  int
-	height int
+	cursor    int
+	statusMsg string
+	width     int
+	height    int
 }
 
 func NewMenu() MenuModel {
 	return MenuModel{}
+}
+
+func NewMenuWithStatus(msg string) MenuModel {
+	return MenuModel{statusMsg: msg}
 }
 
 func (m MenuModel) Init() tea.Cmd { return nil }
@@ -49,8 +54,6 @@ func (m MenuModel) Update(msg tea.Msg) (MenuModel, tea.Cmd) {
 		case "enter", " ":
 			item := menuItems[m.cursor]
 			return m, func() tea.Msg { return NavigateMsg{To: item.nav} }
-		case "ctrl+c":
-			return m, func() tea.Msg { return NavigateMsg{To: NavQuit} }
 		}
 	}
 	return m, nil
@@ -60,6 +63,10 @@ func (m MenuModel) View() string {
 	var b strings.Builder
 	b.WriteString(style.StyleTitle.Render("stalker-tex") + "\n")
 	b.WriteString(style.StyleSubtitle.Render("GAMMA texture compressor & backup tool") + "\n\n")
+
+	if m.statusMsg != "" {
+		b.WriteString(style.StyleMuted.Render(m.statusMsg) + "\n\n")
+	}
 
 	for i, item := range menuItems {
 		if i == m.cursor {

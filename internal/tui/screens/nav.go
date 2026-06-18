@@ -1,5 +1,14 @@
 package screens
 
+import "context"
+
+// OperationStartedMsg is sent by operational screens when a long-running process begins.
+// AppModel stores Cancel so Ctrl+C can abort the operation cleanly.
+type OperationStartedMsg struct {
+	Cancel    context.CancelFunc
+	CancelMsg string // shown on menu after cancel; defaults to "Operation cancelled" if empty
+}
+
 // NavTarget identifies where a NavigateMsg should take the app.
 type NavTarget int
 

@@ -227,6 +227,7 @@ Summary
 - Parse 7zz `-bsp1` stderr progress into a Bubble Tea progress bar
 - Delete old backups with confirmation
 - Verify archive integrity via `7zz t`
+- Supports Ctrl+C cancellation — kills 7zz subprocess, deletes partial archive, returns to main menu
 
 **First-run behavior:** if no backup exists and the user navigates to Scan & Compress,
 show a warning screen recommending backup first. Do not block — let them proceed if they
@@ -242,6 +243,7 @@ explicitly choose to.
   7zz e <archive> -o<mod_dir> "Mods/<ModName>/*" -y
   ```
 - Stream progress back to UI, show completion or error
+- Supports Ctrl+C cancellation — kills 7zz subprocess and returns to main menu
 
 ### 3. Scan
 
@@ -250,6 +252,7 @@ explicitly choose to.
 - Skip files where `DDSInfo.Compressed == true` — never re-compress already compressed textures
 - Emit `assetFoundMsg` per file (async Cmd) so UI stays live during scan
 - Group results by profile for display
+- Supports Ctrl+C cancellation — cancels the walk goroutine via context, returns to main menu with message "Scan cancelled"
 
 #### Classification — Two-Pass System
 
@@ -328,6 +331,23 @@ Run Scope:
 mod, verify it looks correct in game, then run all. Surface this recommendation
 in the UI.
 
+The mod picker for "Run Selected Mod" is identical in behavior to the restore
+screen's mod list — a searchable, fuzzy-filtered list of mod names. Extract this
+into a shared component at `internal/tui/components/modpicker.go` so both screens
+use the same implementation. The mod list is populated from `asset.ModName` values
+in the current scan results. On selection, assets are filtered to the chosen mod
+before being passed to the compression worker pool:
+
+```go
+filtered := []scan.Asset{}
+for _, a := range allAssets {
+    if a.ModName == selectedMod {
+        filtered = append(filtered, a)
+    }
+}
+// pass filtered to worker pool
+```
+
 **What the config screen does NOT have:**
 - Per-profile format picker (format comes from profiles.json)
 - Per-profile mip toggle (generateMips comes from profiles.json)
@@ -338,15 +358,31 @@ in the UI.
 - Worker pool: `max(1, runtime.NumCPU()/2)` concurrent texconv processes
 - Per-file texconv invocation:
   ```
-  texconv -f <FORMAT> -m 0 -y -o <output_dir> <input_file>
+  texconv -f <FORMAT> -m 0 -y -o <output_dir> -- <input_file>
   ```
-  Where `-m 0` generates full mip chain if `generateMips == true` in profile,
+  Note: `--` separator is required before input path — paths starting with `/`
+  are interpreted as flags without it.
+  `-m 0` generates full mip chain if `generateMips == true` in profile,
   or `-m 1` for no mips if `generateMips == false`
 - Capture stdout/stderr per file into `CompressionResult`
 - Emit `compressionDoneMsg` per file to update progress bar
 - On completion: show summary with success count, error count, estimated VRAM delta
 - Error list is navigable; failed files can be retried
 - No retry with different settings — if a file failed, fix profiles.json and rescan
+
+#### Cancellation
+
+All long-running operations (backup, restore, compress) must support Ctrl+C cancellation:
+
+- A `context.WithCancel` context is created at operation start and stored in the
+  top-level model
+- The cancel function is called when Ctrl+C is pressed during an active operation
+- Workers receive the context and check `ctx.Done()` between files
+- The running subprocess is killed via `cmd.Process.Kill()` on cancellation
+- Partial output files are deleted on cancel
+- After cancellation, the app returns to the main menu with message: "Operation cancelled"
+- Ctrl+C on the main menu or any non-operational screen exits the app normally
+- Implemented purely through Bubble Tea key messages — do NOT use `os/signal`
 
 ### 5. Settings
 
@@ -355,8 +391,17 @@ in the UI.
   - Windows: `C:\Games\GAMMA\mods`, `D:\GAMMA\mods`, `%MO2_GAME_PATH%`
   - All path handling via `filepath.Join` — no hardcoded separators anywhere
 - Backup archive path
-- Backup compression level: Fast (`-mx=3`), Balanced (`-mx=6`, default), Maximum (`-mx=9`)
-  - All other 7z flags (`-mfb=64 -md=32m -ms=on -xr!downloads`) are hardcoded, not user-exposed
+- Backup compression level: integer 1-9, default 6
+  - Displayed in Settings as a text input with inline guide:
+    ```
+    Backup Compression Level (1-9): [6]
+
+    1-3  Fast compression, larger archives
+    4-6  Balanced — recommended for most systems
+    7-9  Maximum compression, significantly slower
+    ```
+  - Validated on input — reject values outside 1-9, non-numeric input reverts to previous value
+  - All other 7z flags (`-mfb=64 -md=32m -ms=on -xr!downloads -xr!Downloads`) are hardcoded, not user-exposed
 - Worker thread count for texture compression (default: `max(1, runtime.NumCPU()/2)`)
 - Whether to compress textures in-place or to a staging directory
   (this is the only place this toggle exists — not in the compression config screen)

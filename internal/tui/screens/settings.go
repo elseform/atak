@@ -18,6 +18,7 @@ const (
 	fieldModsDir settingsField = iota
 	fieldBackupDir
 	fieldWorkers
+	fieldBackupLevel
 	fieldInPlace
 	fieldStagingDir
 	fieldCount
@@ -26,7 +27,7 @@ const (
 // SettingsModel handles configuring user preferences.
 type SettingsModel struct {
 	cfg       *config.Config
-	inputs    [3]textinput.Model // mods, backup, workers
+	inputs    [4]textinput.Model // mods, backup, workers, backup-level
 	inPlace   bool
 	focused   settingsField
 	errMsg    string
@@ -48,9 +49,13 @@ func NewSettings(cfg *config.Config) SettingsModel {
 	workers.SetValue(strconv.Itoa(cfg.WorkerCount))
 	workers.Width = 6
 
+	backupLvl := textinput.New()
+	backupLvl.SetValue(strconv.Itoa(cfg.BackupLevel))
+	backupLvl.Width = 6
+
 	return SettingsModel{
 		cfg:     cfg,
-		inputs:  [3]textinput.Model{mods, backup, workers},
+		inputs:  [4]textinput.Model{mods, backup, workers, backupLvl},
 		inPlace: cfg.CompressInPlace,
 		focused: fieldModsDir,
 	}
@@ -87,6 +92,8 @@ func (m SettingsModel) Update(msg tea.Msg) (SettingsModel, tea.Cmd) {
 		m.inputs[1], cmd = m.inputs[1].Update(msg)
 	case fieldWorkers:
 		m.inputs[2], cmd = m.inputs[2].Update(msg)
+	case fieldBackupLevel:
+		m.inputs[3], cmd = m.inputs[3].Update(msg)
 	}
 	return m, cmd
 }
@@ -102,6 +109,8 @@ func (m *SettingsModel) refocus() {
 		m.inputs[1].Focus()
 	case fieldWorkers:
 		m.inputs[2].Focus()
+	case fieldBackupLevel:
+		m.inputs[3].Focus()
 	}
 }
 
@@ -110,10 +119,15 @@ func (m SettingsModel) save() (SettingsModel, tea.Cmd) {
 	if err != nil || workers < 1 {
 		workers = max(1, runtime.NumCPU()/2)
 	}
+	backupLevel, err := strconv.Atoi(strings.TrimSpace(m.inputs[3].Value()))
+	if err != nil || backupLevel < 1 || backupLevel > 9 {
+		backupLevel = m.cfg.BackupLevel
+	}
 	updated := *m.cfg
 	updated.ModsDir = strings.TrimSpace(m.inputs[0].Value())
 	updated.BackupDir = strings.TrimSpace(m.inputs[1].Value())
 	updated.WorkerCount = workers
+	updated.BackupLevel = backupLevel
 	updated.CompressInPlace = m.inPlace
 	return m, func() tea.Msg {
 		return NavigateMsg{To: NavSaveConfig, Data: &updated}
@@ -128,10 +142,13 @@ func (m SettingsModel) View() string {
 		label   string
 		field   settingsField
 		content string
+		hint    string
 	}{
-		{"GAMMA Mods Directory", fieldModsDir, m.inputs[0].View()},
-		{"Backup Directory", fieldBackupDir, m.inputs[1].View()},
-		{"Worker Threads", fieldWorkers, m.inputs[2].View()},
+		{"GAMMA Mods Directory", fieldModsDir, m.inputs[0].View(), ""},
+		{"Backup Directory", fieldBackupDir, m.inputs[1].View(), ""},
+		{"Worker Threads", fieldWorkers, m.inputs[2].View(), ""},
+		{"Backup Compression Level", fieldBackupLevel, m.inputs[3].View(),
+			"1–9  ·  3 = Fast  ·  6 = Balanced (default)  ·  9 = Maximum"},
 	}
 
 	for _, r := range rows {
@@ -139,7 +156,11 @@ func (m SettingsModel) View() string {
 		if m.focused == r.field {
 			label = style.StyleSelected.Render(r.label)
 		}
-		b.WriteString(label + "\n" + r.content + "\n\n")
+		b.WriteString(label + "\n" + r.content + "\n")
+		if r.hint != "" {
+			b.WriteString(style.StyleMuted.Render(r.hint) + "\n")
+		}
+		b.WriteString("\n")
 	}
 
 	// In-place toggle.

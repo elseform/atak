@@ -30,6 +30,7 @@ type Config struct {
 	BackupDir       string   `json:"backupDir"`
 	WorkerCount     int      `json:"workerCount"`
 	CompressInPlace bool     `json:"compressInPlace"`
+	BackupLevel     int      `json:"backupLevel,omitempty"`
 	StagingDir      string   `json:"stagingDir,omitempty"`
 	ScanExclusions  []string `json:"scanExclusions,omitempty"`
 }
@@ -62,6 +63,9 @@ func Load() (*Config, error) {
 	}
 	if len(cfg.ScanExclusions) == 0 {
 		cfg.ScanExclusions = []string{".*", "downloads", "Downloads"}
+	}
+	if cfg.BackupLevel == 0 {
+		cfg.BackupLevel = 6
 	}
 	return &cfg, nil
 }
@@ -123,6 +127,7 @@ func defaultConfig() *Config {
 		ModsDir:         detectModsDir(),
 		WorkerCount:     max(1, runtime.NumCPU()/2),
 		CompressInPlace: true,
+		BackupLevel:     6,
 		ScanExclusions:  []string{".*", "downloads", "Downloads"},
 	}
 }
