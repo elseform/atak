@@ -176,19 +176,52 @@ stalker-tex/
 │   └── tui/
 │       ├── model.go         # top-level AppModel, screen enum, Init/Update/View
 │       ├── styles.go        # lipgloss theme (one place, no scattered styling)
+│       ├── components/
+│       │   ├── modpicker.go    # shared fuzzy mod picker (restore + compress)
+│       │   └── operation.go   # shared progress screen (backup/restore/verify/compress)
 │       └── screens/
 │           ├── welcome.go      # path config, first-run detection
 │           ├── firstrun.go     # one-time profiles.json creation notice
-│           ├── menu.go         # main menu hub
+│           ├── menu.go         # main menu hub (3 items: Scan, Backup, Settings)
 │           ├── about.go        # about + third-party licenses screen
-│           ├── backup.go       # backup manager screen
-│           ├── restore.go      # mod picker + confirm + progress
+│           ├── backup.go       # backup manager — all archive ops including restore
 │           ├── scan.go         # scanning spinner + live counter
 │           ├── results.go      # scan results list, per-category breakdown
 │           ├── compress.go     # execution screen, progress bar, live log
 │           └── summary.go      # completion stats, error list, retry option
+│           # restore.go removed — functionality absorbed into backup.go
 └── SPEC.md                  # this file
 ```
+
+---
+
+## Shared Operation Screen
+
+All long-running operations (backup, restore, verify, compress) use a single
+shared `OperationScreen` component at `internal/tui/components/operation.go`.
+
+```
+┌─────────────────────────────────────────┐
+│  <Operation Title>                      │
+│                                         │
+│  [spinner]                              │
+│  [progress bar]                         │
+│  Status: <current file or status line>  │
+│  Size: <archive or output size>         │
+│  Elapsed: <time>                        │
+│                                         │
+│  ctrl+c to cancel                       │
+└─────────────────────────────────────────┘
+```
+
+The component accepts:
+- A title string
+- A channel of `OperationProgressMsg` (percent int, status string, size int64)
+- A cancel function
+
+All four operations (backup, restore, verify, compress) feed into this same
+component. This ensures consistent progress feedback across all operations and
+means verify gets a progress indicator for free.
 
 ---
 
@@ -201,7 +234,6 @@ Welcome / Path Config
    Main Menu ◄──────────────────────────┐
    ├── Scan & Compress                  │
    ├── Backup Manager                   │
-   ├── Restore Mod                      │
    └── Settings                         │
         │                               │
    ┌────┴────────────────────────┐      │
@@ -236,6 +268,31 @@ Summary
 
 ### 1. Backup Manager
 
+All archive operations live in one screen — the user selects an archive once
+and all operations on it are available in place. No separate Restore screen.
+
+```
+┌─────────────────────────────────────────────────────┐
+│  Backup Manager                                     │
+│                                                     │
+│  Archive: ~/gamma/backup/gamma_backup.7z            │
+│  Size: 50GB  •  Created: 2 days ago                 │
+│                                                     │
+│  > Create New Backup                                │
+│    Restore Single Mod                               │
+│    Restore All                                      │
+│    Verify Archive                                   │
+│    Delete Backup                                    │
+└─────────────────────────────────────────────────────┘
+```
+
+- **Restore Single Mod** — launches the shared `ModPicker` component to select
+  a mod, then runs restore via the shared `OperationScreen` component
+- **Restore All** — confirmation dialog, then full restore via `OperationScreen`
+- The separate `internal/tui/screens/restore.go` is removed — all restore
+  functionality lives in `backup.go`. The `ModPicker` component is reused.
+- Main menu has three items: Scan & Compress, Backup Manager, Settings
+
 - List existing backups in the GAMMA directory archive with size and date
 - Create a new LZMA solid archive of the full GAMMA mods directory via:
   ```
@@ -256,17 +313,37 @@ Summary
 show a warning screen recommending backup first. Do not block — let them proceed if they
 explicitly choose to.
 
-### 2. Restore Mod
+### 2. Restore
 
+Two restore modes accessible from the Restore screen:
+
+```
+Restore:
+  > Restore Single Mod   ← fuzzy mod picker, restores one mod
+    Restore All          ← full restore, no filter
+```
+
+**Restore Single Mod:**
 - Run `7zz l <archive>` and parse the file listing into a mod name list
 - Display as a searchable bubbles/list (fuzzy filter on mod name)
 - Confirm dialog showing: mod name, backup date, size on disk
 - Restore via:
   ```
-  7zz e <archive> -o<mod_dir> "Mods/<ModName>/*" -y
+  7zz x <archive> -o<parent_of_mods_dir> "mods/<ModName>/*" -r -y
   ```
-- Stream progress back to UI, show completion or error
-- Supports Ctrl+C cancellation — kills 7zz subprocess and returns to main menu
+
+**Restore All:**
+- Confirmation dialog with clear warning: "This will overwrite all mod files
+  with backup versions. Continue?"
+- Restore via:
+  ```
+  7zz x <archive> -o<parent_of_mods_dir> -r -y
+  ```
+- No path filter — extracts everything from the archive
+
+Both modes:
+- Stream progress back to UI via shared OperationScreen component
+- Support Ctrl+C cancellation — kills 7zz subprocess, returns to main menu
 
 ### 3. Scan
 
@@ -302,12 +379,28 @@ Filename match always wins over header default. Profiles are fully user-defined
 in `profiles.json` — the binary applies whatever profiles are loaded.
 
 **Result buckets in scan results:**
-- One bucket per named profile (from profiles.json)
-- `Auto (alpha)` — unmatched files with alpha channel, suggested BC7
-- `Auto (no alpha)` — unmatched files without alpha, suggested BC1
-- All buckets shown regardless of count (zero-hit profiles still render)
+- One bucket per named profile (from profiles.json) — shown regardless of count,
+  even zero-hit profiles must render (allows users to verify pattern coverage)
+- `Auto (alpha)` — header-classified files with alpha channel, suggested BC7
+- `Auto (no alpha)` — header-classified files without alpha, suggested BC1
+- `Unknown format` — files with unrecognized FourCC or DXGI format codes that
+  cannot be safely classified — skipped from compression by default
 
-There is no "Unmatched" bucket — every uncompressed file gets a suggested format.
+**Counters on scan results screen:**
+- `___ to compress` — total uncompressed files with a known suggested format
+- `___ skipped (compressed)` — files found but skipped because `DDSInfo.Compressed == true`
+  This should be ~24,000 for a full GAMMA install. The count must be tracked in
+  `scan.Walk` and passed through to the results screen — not calculated from
+  the asset list after the fact (already-compressed files are never emitted
+  to the assets channel, so they must be counted inside the walker).
+- Remove "already done" counter — implies state tracking that doesn't exist
+- Remove "unmatched" counter — always 0, misleading
+
+**Unknown format handling:**
+Files where the FourCC or DXGI format code is not recognized are marked
+`Asset.Unknown = true`. They appear in the "Unknown format" bucket and are
+excluded from all compression jobs. Do not attempt to compress unknown formats —
+texconv behavior on unrecognized input is undefined and may produce corrupt output.
 
 #### Scanner Exclusions
 
@@ -550,6 +643,11 @@ To keep maintenance footprint small, the following are explicitly out of scope:
 - **Atomic compression** — compress to staging directory, verify all files
   succeeded, then diff-apply in one pass. Failed jobs leave the mod directory
   untouched. Planned for v1.1.
+- **Scan metadata persistence** — store scan results and compression history
+  to disk. Enables: "already done" tracking, restore by profile, incremental
+  rescans. Requires a simple local database or JSON state file.
+- **Restore by profile** — restore only mods containing textures that match
+  a given profile. Dependent on scan metadata persistence.
 - **stalker-update** — separate binary, same visual identity, handles GAMMA
   mod updates selectively. Dependent on community reception of stalker-tex.
 

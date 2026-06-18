@@ -5,7 +5,6 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/noisethanks/stalker-tex/internal/config"
-	"github.com/noisethanks/stalker-tex/internal/scan"
 	"github.com/noisethanks/stalker-tex/internal/tools"
 	"github.com/noisethanks/stalker-tex/internal/tui/screens"
 )
@@ -227,9 +226,9 @@ func (m AppModel) handleNavigate(msg screens.NavigateMsg) (tea.Model, tea.Cmd) {
 		return m, m.scanScreen.Init()
 
 	case screens.NavResults:
-		assets, _ := msg.Data.([]scan.Asset)
+		data, _ := msg.Data.(screens.ScanResultData)
 		m.screen = ScreenResults
-		m.results = screens.NewResults(assets, m.cfg)
+		m.results = screens.NewResults(data, m.cfg)
 		m.results.SetSize(m.width, m.height)
 		return m, m.results.Init()
 

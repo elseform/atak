@@ -13,14 +13,18 @@ import (
 	"github.com/noisethanks/stalker-tex/internal/tui/style"
 )
 
-// assetFoundMsg carries one discovered asset and the channel to read the next from.
+// assetFoundMsg carries one discovered asset and the channels to continue reading.
 type assetFoundMsg struct {
-	asset scan.Asset
-	ch    <-chan scan.Asset
+	asset     scan.Asset
+	ch        <-chan scan.Asset
+	skippedCh <-chan int
 }
 
 // scanCompleteMsg signals the walker is finished.
-type scanCompleteMsg struct{ total int }
+type scanCompleteMsg struct {
+	total   int
+	skipped int
+}
 
 // ScanModel shows a live counter while the walker runs.
 type ScanModel struct {
@@ -29,9 +33,9 @@ type ScanModel struct {
 	spinner spinner.Model
 	ctx     context.Context
 	cancel  context.CancelFunc
-	assets  []scan.Asset
-	found   int
-	done    bool
+	assets []scan.Asset
+	found  int
+	done   bool
 	err     string
 	width   int
 	height  int
@@ -60,21 +64,21 @@ func (m ScanModel) startScan() tea.Cmd {
 		if err != nil || len(profiles) == 0 {
 			return scanCompleteMsg{total: 0}
 		}
-		ch, _ := scan.Walk(modsDir, profiles, m.cfg.ScanExclusions)
-		return readNextAsset(ctx, ch)
+		ch, skippedCh, _ := scan.Walk(modsDir, profiles, m.cfg.ScanExclusions)
+		return readNextAsset(ctx, ch, skippedCh)
 	}
 }
 
-func readNextAsset(ctx context.Context, ch <-chan scan.Asset) tea.Msg {
+func readNextAsset(ctx context.Context, ch <-chan scan.Asset, skippedCh <-chan int) tea.Msg {
 	select {
 	case <-ctx.Done():
 		go func() { for range ch {} }() // drain so walker goroutine exits
 		return scanCompleteMsg{}
 	case asset, ok := <-ch:
 		if !ok {
-			return scanCompleteMsg{}
+			return scanCompleteMsg{skipped: <-skippedCh}
 		}
-		return assetFoundMsg{asset: asset, ch: ch}
+		return assetFoundMsg{asset: asset, ch: ch, skippedCh: skippedCh}
 	}
 }
 
@@ -88,9 +92,9 @@ func (m ScanModel) Update(msg tea.Msg) (ScanModel, tea.Cmd) {
 	case assetFoundMsg:
 		m.assets = append(m.assets, msg.asset)
 		m.found++
-		ch := msg.ch
+		ch, skippedCh := msg.ch, msg.skippedCh
 		ctx := m.ctx
-		return m, func() tea.Msg { return readNextAsset(ctx, ch) }
+		return m, func() tea.Msg { return readNextAsset(ctx, ch, skippedCh) }
 
 	case scanCompleteMsg:
 		m.done = true
@@ -98,9 +102,9 @@ func (m ScanModel) Update(msg tea.Msg) (ScanModel, tea.Cmd) {
 			m.err = "No .dds files found in " + m.cfg.ModsDir
 			return m, nil
 		}
-		assets := m.assets
+		assets, skipped := m.assets, msg.skipped
 		return m, func() tea.Msg {
-			return NavigateMsg{To: NavResults, Data: assets}
+			return NavigateMsg{To: NavResults, Data: ScanResultData{Assets: assets, Skipped: skipped}}
 		}
 	}
 	return m, nil

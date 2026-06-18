@@ -10,29 +10,43 @@ import (
 	"github.com/noisethanks/stalker-tex/internal/tui/style"
 )
 
-// ResultsModel shows scan results grouped by compression profile.
-type ResultsModel struct {
-	groups      []AssetGroup
-	unmatched   []scan.Asset
-	alreadyDone []scan.Asset
-	cursor      int
-	cfg         *config.Config
-	width       int
-	height      int
+// ScanResultData is passed from Scan → Results via NavigateMsg.
+type ScanResultData struct {
+	Assets  []scan.Asset
+	Skipped int
 }
 
-func NewResults(assets []scan.Asset, cfg *config.Config) ResultsModel {
+// ResultsModel shows scan results grouped by compression profile.
+type ResultsModel struct {
+	groups  []AssetGroup
+	skipped int
+	cursor  int
+	cfg     *config.Config
+	width   int
+	height  int
+}
+
+func NewResults(data ScanResultData, cfg *config.Config) ResultsModel {
 	var ordered []AssetGroup
 	groupIdx := make(map[string]int) // profile name -> index in ordered
-	var unmatched, done []scan.Asset
 
-	for _, a := range assets {
-		if a.Compressed {
-			done = append(done, a)
-			continue
-		}
+	// Pre-populate all named profiles so zero-hit profiles still render.
+	profiles, _, _ := config.LoadProfiles()
+	for _, p := range profiles {
+		groupIdx[p.Name] = len(ordered)
+		ordered = append(ordered, AssetGroup{
+			ProfileName:  p.Name,
+			SuggestedFmt: p.Format,
+		})
+	}
+	// Auto buckets always present regardless of match count.
+	groupIdx["Auto (alpha)"] = len(ordered)
+	ordered = append(ordered, AssetGroup{ProfileName: "Auto (alpha)", SuggestedFmt: "BC7_UNORM"})
+	groupIdx["Auto (no alpha)"] = len(ordered)
+	ordered = append(ordered, AssetGroup{ProfileName: "Auto (no alpha)", SuggestedFmt: "BC1_UNORM"})
+
+	for _, a := range data.Assets {
 		if a.ProfileMatch == "" {
-			unmatched = append(unmatched, a)
 			continue
 		}
 		idx, ok := groupIdx[a.ProfileMatch]
@@ -55,10 +69,9 @@ func NewResults(assets []scan.Asset, cfg *config.Config) ResultsModel {
 	}
 
 	return ResultsModel{
-		groups:      ordered,
-		unmatched:   unmatched,
-		alreadyDone: done,
-		cfg:         cfg,
+		groups:  ordered,
+		skipped: data.Skipped,
+		cfg:     cfg,
 	}
 }
 
@@ -104,10 +117,9 @@ func (m ResultsModel) View() string {
 		total += len(g.Assets)
 	}
 	b.WriteString(fmt.Sprintf(
-		"%s  %s  %s\n\n",
+		"%s  %s\n\n",
 		style.StyleBody.Render(fmt.Sprintf("%d to compress", total)),
-		style.StyleSuccess.Render(fmt.Sprintf("%d already done", len(m.alreadyDone))),
-		style.StyleMuted.Render(fmt.Sprintf("%d unmatched", len(m.unmatched))),
+		style.StyleMuted.Render(fmt.Sprintf("%d skipped (compressed)", m.skipped)),
 	))
 
 	if len(m.groups) == 0 {

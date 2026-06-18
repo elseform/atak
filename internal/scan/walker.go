@@ -21,16 +21,17 @@ type Asset struct {
 	SuggestedFmt string
 }
 
-// Walk traverses modsDir, emitting Asset values for every .dds file found.
-// Each asset is sent on the returned channel; the channel is closed when done.
-// Errors during individual file parsing are non-fatal; the asset is skipped.
-func Walk(modsDir string, profiles []config.Profile, exclusions []string) (<-chan Asset, <-chan error) {
+// Walk traverses modsDir, emitting Asset values for every uncompressed .dds file found.
+// Returns three channels: assets, skipped count (one value sent on completion), and errors.
+// The skipped count is sent before the assets channel is closed, so reading it is race-free.
+func Walk(modsDir string, profiles []config.Profile, exclusions []string) (<-chan Asset, <-chan int, <-chan error) {
 	assets := make(chan Asset, 256)
+	skippedCh := make(chan int, 1)
 	errs := make(chan error, 1)
 
 	go func() {
-		defer close(assets)
 		defer close(errs)
+		var skipped int
 
 		err := filepath.WalkDir(modsDir, func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
@@ -53,6 +54,7 @@ func Walk(modsDir string, profiles []config.Profile, exclusions []string) (<-cha
 				return nil // skip unparseable files silently
 			}
 			if info.Compressed {
+				skipped++
 				return nil
 			}
 
@@ -85,12 +87,15 @@ func Walk(modsDir string, profiles []config.Profile, exclusions []string) (<-cha
 			}
 			return nil
 		})
+		skippedCh <- skipped
+		close(assets)
+		close(skippedCh)
 		if err != nil {
 			errs <- err
 		}
 	}()
 
-	return assets, errs
+	return assets, skippedCh, errs
 }
 
 // modNameFromRel extracts the top-level mod directory name from a relative path.
