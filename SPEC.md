@@ -501,8 +501,22 @@ for _, a := range allAssets {
   `-m 0` generates full mip chain if `generateMips == true` in profile,
   or `-m 1` for no mips if `generateMips == false`
 - Capture stdout/stderr per file into `CompressionResult`
-- Emit `compressionDoneMsg` per file to update progress bar
-- On completion: show summary with success count, error count, estimated VRAM delta
+- Emit `compressionDoneMsg` per file — adapted to feed shared `OperationScreen`
+  component with:
+  ```go
+  OperationProgressMsg{
+      Percent: (doneCount * 100) / totalCount,
+      Status:  filepath.Base(asset.Path),  // current file
+      Size:    totalBytesSaved,            // accumulated bytes saved
+      Done:    allWorkersFinished,
+  }
+  ```
+- Per-file errors accumulate separately and are shown on the summary screen —
+  individual file failures do not set `Err` on `OperationProgressMsg`
+- Uses shared `internal/tui/components/operation.go` for progress display —
+  same spinner/size/elapsed UI as backup and restore
+- On completion: transition to summary screen with success count, error count,
+  estimated VRAM delta
 - Error list is navigable; failed files can be retried
 - No retry with different settings — if a file failed, fix profiles.json and rescan
 
@@ -514,11 +528,54 @@ All long-running operations (backup, restore, compress) must support Ctrl+C canc
   top-level model
 - The cancel function is called when Ctrl+C is pressed during an active operation
 - Workers receive the context and check `ctx.Done()` between files
-- The running subprocess is killed via `cmd.Process.Kill()` on cancellation
+- Subprocess kill on cancellation — two steps required:
+  1. Set `cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}` when creating
+     the command — puts the subprocess in its own process group
+  2. On cancel: `syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)` — kills the
+     entire process group including any children 7zz or texconv may have spawned
+  3. `cmd.Wait()` after kill will return an error — swallow it as expected
 - Partial output files are deleted on cancel
 - After cancellation, the app returns to the main menu with message: "Operation cancelled"
 - Ctrl+C on the main menu or any non-operational screen exits the app normally
 - Implemented purely through Bubble Tea key messages — do NOT use `os/signal`
+
+#### Crash / Orphan Process Mitigation
+
+Platform-specific process management is split into build-tag files:
+- `internal/tools/process_linux.go` — `//go:build linux`
+- `internal/tools/process_windows.go` — `//go:build windows`
+
+Both expose the same interface:
+```go
+func killProcess(cmd *exec.Cmd)   // kill subprocess on cancel
+func setProcAttr(cmd *exec.Cmd)   // set process attributes before Start()
+```
+
+**Linux:**
+- `setProcAttr` sets `cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}`
+- `killProcess` uses `syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)` to kill
+  the entire process group
+- Crash mitigation via lockfile:
+  - On operation start: write `~/.config/stalker-tex/stalker-tex.lock` with PID
+  - On clean end: delete lockfile
+  - On startup: check for stale lockfile, kill stale PID, log warning
+  - Lockfile lives in `internal/tools/lockfile.go` (Linux build tag only)
+
+**Windows (v1.0):**
+- `setProcAttr` is a no-op
+- `killProcess` calls `cmd.Process.Kill()` — sufficient for cancel case
+- No lockfile — crash may leave 7zz running; user can kill from Task Manager
+- Document this limitation in README
+
+**Windows (v1.1 — future):**
+- Replace no-op `setProcAttr` with Windows Job Object setup:
+  ```go
+  // Create job with JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+  // Assign subprocess to job after cmd.Start()
+  // When Go process exits (clean or crash), Windows kills all job members
+  ```
+- Self-contained change to `process_windows.go` only — no refactor needed
+- Uses `golang.org/x/sys/windows` package (~50-60 lines total)
 
 ### 5. Settings
 
@@ -606,6 +663,25 @@ These must be followed consistently or the architecture drifts:
 - Screen transitions happen by returning a new screen enum value from Update.
   The top-level model swaps the active screen on the next render cycle.
 
+## Persistent Scan State
+
+Scan results must persist in `AppModel`, not in `ResultsModel`. This prevents
+state loss when navigating away from and back to the results screen.
+
+```go
+// AppModel holds scan state at the top level
+type AppModel struct {
+    // ...
+    scanAssets  []scan.Asset  // persisted after scan completes
+    scanSkipped int           // persisted after scan completes
+}
+```
+
+When navigating back to results, reconstruct `ResultsModel` from `AppModel.scanAssets`
+and `AppModel.scanSkipped` — never lose scan data on screen transition.
+
+`ResultsModel` is a view over the data, not the owner of it.
+
 ---
 
 ## About / Licenses Screen
@@ -668,6 +744,11 @@ To keep maintenance footprint small, the following are explicitly out of scope:
   rescans. Requires a simple local database or JSON state file.
 - **Restore by profile** — restore only mods containing textures that match
   a given profile. Dependent on scan metadata persistence.
+- **Windows Job Object process management** — replace the v1.0 no-op
+  `setProcAttr` on Windows with Job Object setup so crashed Go processes
+  automatically kill orphaned 7zz/texconv subprocesses. Self-contained change
+  to `internal/tools/process_windows.go` only, ~50-60 lines using
+  `golang.org/x/sys/windows`. No refactor needed.
 - **stalker-update** — separate binary, same visual identity, handles GAMMA
   mod updates selectively. Dependent on community reception of stalker-tex.
 
