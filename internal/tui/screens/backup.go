@@ -9,8 +9,6 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/bubbles/progress"
-	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/noisethanks/stalker-tex/internal/archive"
 	"github.com/noisethanks/stalker-tex/internal/config"
 	"github.com/noisethanks/stalker-tex/internal/tools"
@@ -23,15 +21,12 @@ type backupState int
 const (
 	backupStateMenu backupState = iota
 	backupStatePickArchive
-	backupStateCreating
+	backupStateOperation
 	backupStatePickMod
 	backupStateConfirmRestore
-	backupStateRestoring
 	backupStateRestoreDone
 	backupStateConfirmRestoreAll
-	backupStateRestoringAll
 	backupStateRestoringAllDone
-	backupStateVerifying
 	backupStateConfirmDelete
 )
 
@@ -44,33 +39,22 @@ const (
 	pendingDelete
 )
 
-// archiveTickMsg carries one progress update and the channels for the next read.
-type archiveTickMsg struct {
-	prog   archive.ProgressMsg
-	progCh <-chan archive.ProgressMsg
-	doneCh <-chan error
-}
+type backupActiveOp int
 
-// archiveFinishedMsg signals the backup creation operation is complete.
-type archiveFinishedMsg struct{ err error }
+const (
+	activeOpBackup backupActiveOp = iota
+	activeOpRestoreSingle
+	activeOpRestoreAll
+	activeOpVerify
+)
 
 type backupsLoadedMsg struct{ backups []archive.BackupInfo }
-type verifyDoneMsg struct{ err error }
-type backupSizeMsg struct{ bytes int64 }
 
 type modsListedMsg struct {
 	mods       []string
 	backupName string
 	backupPath string
 }
-
-type restoreTickMsg struct {
-	prog   archive.ProgressMsg
-	progCh <-chan archive.ProgressMsg
-	doneCh <-chan error
-}
-type restoreFinishedMsg struct{ err error }
-type restoreSizeMsg struct{ bytes int64 }
 
 var backupMenuItems = []string{
 	"Create New Backup",
@@ -89,16 +73,11 @@ type BackupModel struct {
 	menuCursor    int
 	cursor        int
 	pendingAction backupPendingAction
+	activeOp      backupActiveOp
 	modPicker     components.ModPicker
 	selectedMod   string
 	selectedBak   archive.BackupInfo
-	bar           progress.Model
-	spinner       spinner.Model
-	curPct        float64
-	curFile       string
-	archiveSize   int64
-	restoreSize   int64
-	outPath       string
+	opScreen      components.OperationScreen
 	statusMsg     string
 	errMsg        string
 	width         int
@@ -106,14 +85,9 @@ type BackupModel struct {
 }
 
 func NewBackup(cfg *config.Config, t *tools.EmbeddedTools) BackupModel {
-	bar := progress.New(progress.WithDefaultGradient())
-	sp := spinner.New()
-	sp.Spinner = spinner.Dot
 	return BackupModel{
 		cfg:       cfg,
 		tools:     t,
-		bar:       bar,
-		spinner:   sp,
 		modPicker: components.NewModPicker(nil, 60, 20),
 	}
 }
@@ -131,6 +105,15 @@ func (m BackupModel) loadBackups() tea.Cmd {
 }
 
 func (m BackupModel) Update(msg tea.Msg) (BackupModel, tea.Cmd) {
+	if m.state == backupStateOperation {
+		var cmd tea.Cmd
+		m.opScreen, cmd = m.opScreen.Update(msg)
+		if m.opScreen.IsDone() {
+			return m.handleOperationDone()
+		}
+		return m, cmd
+	}
+
 	switch msg := msg.(type) {
 	case backupsLoadedMsg:
 		m.backups = msg.backups
@@ -159,89 +142,6 @@ func (m BackupModel) Update(msg tea.Msg) (BackupModel, tea.Cmd) {
 	case components.ModPickerCancelledMsg:
 		m.state = backupStatePickArchive
 		return m, nil
-
-	case spinner.TickMsg:
-		var cmd tea.Cmd
-		m.spinner, cmd = m.spinner.Update(msg)
-		if m.state == backupStateCreating || m.state == backupStateRestoring || m.state == backupStateRestoringAll {
-			return m, cmd
-		}
-		return m, nil
-
-	case backupSizeMsg:
-		m.archiveSize = msg.bytes
-		if m.state == backupStateCreating {
-			return m, pollBackupSize(m.outPath)
-		}
-		return m, nil
-
-	case restoreSizeMsg:
-		m.restoreSize = msg.bytes
-		if m.state == backupStateRestoring {
-			return m, pollRestoreSize(filepath.Join(m.cfg.ModsDir, m.selectedMod))
-		}
-		if m.state == backupStateRestoringAll {
-			return m, pollRestoreSize(m.cfg.ModsDir)
-		}
-		return m, nil
-
-	case archiveTickMsg:
-		m.curPct = float64(msg.prog.Percent) / 100.0
-		m.curFile = msg.prog.CurrentFile
-		progCh, doneCh := msg.progCh, msg.doneCh
-		return m, tea.Batch(
-			m.bar.SetPercent(m.curPct),
-			func() tea.Msg { return readArchiveProgress(progCh, doneCh) },
-		)
-
-	case archiveFinishedMsg:
-		if msg.err != nil {
-			m.errMsg = msg.err.Error()
-		} else {
-			m.statusMsg = "Backup complete."
-		}
-		m.state = backupStateMenu
-		return m, m.loadBackups()
-
-	case restoreTickMsg:
-		m.curPct = float64(msg.prog.Percent) / 100.0
-		m.curFile = msg.prog.CurrentFile
-		progCh, doneCh := msg.progCh, msg.doneCh
-		return m, tea.Batch(
-			m.bar.SetPercent(m.curPct),
-			func() tea.Msg { return readRestoreProgress(progCh, doneCh) },
-		)
-
-	case restoreFinishedMsg:
-		if msg.err != nil {
-			m.errMsg = msg.err.Error()
-		} else {
-			if m.state == backupStateRestoringAll {
-				m.statusMsg = "Restore all complete."
-			} else {
-				m.statusMsg = fmt.Sprintf("Restored %q successfully.", m.selectedMod)
-			}
-		}
-		if m.state == backupStateRestoringAll {
-			m.state = backupStateRestoringAllDone
-		} else {
-			m.state = backupStateRestoreDone
-		}
-		return m, nil
-
-	case verifyDoneMsg:
-		m.state = backupStateMenu
-		if msg.err != nil {
-			m.errMsg = "Verify failed: " + msg.err.Error()
-		} else {
-			m.statusMsg = "Archive verified OK."
-		}
-		return m, nil
-
-	case progress.FrameMsg:
-		updated, cmd := m.bar.Update(msg)
-		m.bar = updated.(progress.Model)
-		return m, cmd
 
 	case tea.KeyMsg:
 		if m.state == backupStatePickMod {
@@ -351,6 +251,45 @@ func (m BackupModel) handleKey(key string) (BackupModel, tea.Cmd) {
 	return m, nil
 }
 
+func (m BackupModel) handleOperationDone() (BackupModel, tea.Cmd) {
+	err := m.opScreen.Err()
+	switch m.activeOp {
+	case activeOpBackup:
+		if err != nil {
+			m.errMsg = err.Error()
+		} else {
+			m.statusMsg = "Backup complete."
+		}
+		m.state = backupStateMenu
+		return m, m.loadBackups()
+	case activeOpRestoreSingle:
+		if err != nil {
+			m.errMsg = err.Error()
+		} else {
+			m.statusMsg = fmt.Sprintf("Restored %q successfully.", m.selectedMod)
+		}
+		m.state = backupStateRestoreDone
+		return m, nil
+	case activeOpRestoreAll:
+		if err != nil {
+			m.errMsg = err.Error()
+		} else {
+			m.statusMsg = "Restore all complete."
+		}
+		m.state = backupStateRestoringAllDone
+		return m, nil
+	case activeOpVerify:
+		if err != nil {
+			m.errMsg = "Verify failed: " + err.Error()
+		} else {
+			m.statusMsg = "Archive verified OK."
+		}
+		m.state = backupStateMenu
+		return m, nil
+	}
+	return m, nil
+}
+
 func (m BackupModel) selectArchiveOrPick(action backupPendingAction) (BackupModel, tea.Cmd) {
 	m.pendingAction = action
 	if len(m.backups) == 0 {
@@ -390,127 +329,178 @@ func (m BackupModel) handleSelectedArchive(bk archive.BackupInfo) (BackupModel, 
 
 func (m BackupModel) startBackup() (BackupModel, tea.Cmd) {
 	ctx, cancel := context.WithCancel(context.Background())
-	m.state = backupStateCreating
-	m.curPct = 0
-	m.archiveSize = 0
-	szPath := m.tools.SevenZipPath
-	modsDir := m.cfg.ModsDir
 	outPath := filepath.Join(m.cfg.BackupDir, fmt.Sprintf(
 		"gamma-backup-%s.7z", time.Now().Format("2006-01-02-150405")))
-	m.outPath = outPath
-
+	sizeFunc := func() int64 {
+		info, err := os.Stat(outPath)
+		if err != nil {
+			return 0
+		}
+		return info.Size()
+	}
+	progCh, doneCh := archive.Backup(ctx, m.tools.SevenZipPath, m.cfg.ModsDir, outPath, m.cfg.BackupLevel)
+	ch := archiveToCh(progCh, doneCh, sizeFunc)
+	m.opScreen = components.NewOperationScreen("Creating Backup…", ch, cancel)
+	m.opScreen.SetSize(m.width, m.height)
+	m.state = backupStateOperation
+	m.activeOp = activeOpBackup
 	return m, tea.Batch(
 		func() tea.Msg { return OperationStartedMsg{Cancel: cancel} },
-		m.spinner.Tick,
-		pollBackupSize(outPath),
-		func() tea.Msg {
-			progCh, doneCh := archive.Backup(ctx, szPath, modsDir, outPath, m.cfg.BackupLevel)
-			return readArchiveProgress(progCh, doneCh)
-		},
+		m.opScreen.Init(),
 	)
 }
 
 func (m BackupModel) startRestore() (BackupModel, tea.Cmd) {
 	ctx, cancel := context.WithCancel(context.Background())
-	m.state = backupStateRestoring
-	m.curPct = 0
-	m.restoreSize = 0
-	szPath := m.tools.SevenZipPath
-	archivePath := m.selectedBak.Path
 	modName := m.selectedMod
 	modDir := m.cfg.ModsDir
-
-	return m, tea.Batch(
-		func() tea.Msg { return OperationStartedMsg{Cancel: cancel} },
-		m.spinner.Tick,
-		pollRestoreSize(filepath.Join(modDir, modName)),
-		func() tea.Msg {
-			progCh, doneCh := archive.Restore(ctx, szPath, archivePath, modName, modDir)
-			return readRestoreProgress(progCh, doneCh)
-		},
-	)
-}
-
-func (m BackupModel) startRestoreAll() (BackupModel, tea.Cmd) {
-	ctx, cancel := context.WithCancel(context.Background())
-	m.state = backupStateRestoringAll
-	m.curPct = 0
-	m.restoreSize = 0
-	szPath := m.tools.SevenZipPath
-	archivePath := m.selectedBak.Path
-	modsParentDir := filepath.Dir(m.cfg.ModsDir)
-
-	return m, tea.Batch(
-		func() tea.Msg { return OperationStartedMsg{Cancel: cancel} },
-		m.spinner.Tick,
-		pollRestoreSize(m.cfg.ModsDir),
-		func() tea.Msg {
-			progCh, doneCh := archive.RestoreAll(ctx, szPath, archivePath, modsParentDir)
-			return readRestoreProgress(progCh, doneCh)
-		},
-	)
-}
-
-func pollBackupSize(path string) tea.Cmd {
-	return func() tea.Msg {
-		time.Sleep(time.Second)
-		info, err := os.Stat(path)
-		if err != nil {
-			return backupSizeMsg{}
-		}
-		return backupSizeMsg{bytes: info.Size()}
-	}
-}
-
-func pollRestoreSize(dir string) tea.Cmd {
-	return func() tea.Msg {
-		time.Sleep(time.Second)
+	restoreTarget := filepath.Join(modDir, modName)
+	sizeFunc := func() int64 {
 		var total int64
-		_ = filepath.Walk(dir, func(_ string, info os.FileInfo, err error) error {
+		_ = filepath.Walk(restoreTarget, func(_ string, info os.FileInfo, err error) error {
 			if err != nil || info == nil || info.IsDir() {
 				return nil
 			}
 			total += info.Size()
 			return nil
 		})
-		return restoreSizeMsg{bytes: total}
+		return total
 	}
+	progCh, doneCh := archive.Restore(ctx, m.tools.SevenZipPath, m.selectedBak.Path, modName, modDir)
+	ch := archiveToCh(progCh, doneCh, sizeFunc)
+	m.opScreen = components.NewOperationScreen("Restoring: "+modName+"…", ch, cancel)
+	m.opScreen.SetSize(m.width, m.height)
+	m.state = backupStateOperation
+	m.activeOp = activeOpRestoreSingle
+	return m, tea.Batch(
+		func() tea.Msg { return OperationStartedMsg{Cancel: cancel} },
+		m.opScreen.Init(),
+	)
+}
+
+func (m BackupModel) startRestoreAll() (BackupModel, tea.Cmd) {
+	ctx, cancel := context.WithCancel(context.Background())
+	modsDir := m.cfg.ModsDir
+	sizeFunc := func() int64 {
+		var total int64
+		_ = filepath.Walk(modsDir, func(_ string, info os.FileInfo, err error) error {
+			if err != nil || info == nil || info.IsDir() {
+				return nil
+			}
+			total += info.Size()
+			return nil
+		})
+		return total
+	}
+	progCh, doneCh := archive.RestoreAll(ctx, m.tools.SevenZipPath, m.selectedBak.Path, filepath.Dir(modsDir))
+	ch := archiveToCh(progCh, doneCh, sizeFunc)
+	m.opScreen = components.NewOperationScreen("Restoring All Mods…", ch, cancel)
+	m.opScreen.SetSize(m.width, m.height)
+	m.state = backupStateOperation
+	m.activeOp = activeOpRestoreAll
+	return m, tea.Batch(
+		func() tea.Msg { return OperationStartedMsg{Cancel: cancel} },
+		m.opScreen.Init(),
+	)
 }
 
 func (m BackupModel) startVerify() (BackupModel, tea.Cmd) {
-	m.state = backupStateVerifying
-	szPath := m.tools.SevenZipPath
-	archivePath := m.selectedBak.Path
-	return m, func() tea.Msg {
-		return verifyDoneMsg{err: archive.Verify(szPath, archivePath)}
-	}
+	ctx, cancel := context.WithCancel(context.Background())
+	ch := verifyToCh(ctx, m.tools.SevenZipPath, m.selectedBak.Path)
+	m.opScreen = components.NewOperationScreen("Verifying: "+m.selectedBak.Name, ch, cancel)
+	m.opScreen.SetSize(m.width, m.height)
+	m.state = backupStateOperation
+	m.activeOp = activeOpVerify
+	return m, tea.Batch(
+		func() tea.Msg { return OperationStartedMsg{Cancel: cancel} },
+		m.opScreen.Init(),
+	)
 }
 
-func readArchiveProgress(progCh <-chan archive.ProgressMsg, doneCh <-chan error) tea.Msg {
-	select {
-	case p, ok := <-progCh:
-		if !ok {
-			return archiveFinishedMsg{err: <-doneCh}
+// archiveToCh bridges archive progress channels to OperationProgressMsg.
+// sizeFunc is called on each progress event and on a 1-second ticker; pass nil to skip size reporting.
+func archiveToCh(
+	progCh <-chan archive.ProgressMsg,
+	doneCh <-chan error,
+	sizeFunc func() int64,
+) <-chan components.OperationProgressMsg {
+	out := make(chan components.OperationProgressMsg, 32)
+	go func() {
+		defer close(out)
+		var lastPct int
+		var lastStatus string
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case p, ok := <-progCh:
+				if !ok {
+					err := <-doneCh
+					size := int64(0)
+					if sizeFunc != nil {
+						size = sizeFunc()
+					}
+					out <- components.OperationProgressMsg{
+						Done: true, Err: err,
+						Percent: lastPct, Status: lastStatus, Size: size,
+					}
+					return
+				}
+				lastPct = p.Percent
+				lastStatus = p.CurrentFile
+				size := int64(0)
+				if sizeFunc != nil {
+					size = sizeFunc()
+				}
+				out <- components.OperationProgressMsg{
+					Percent: lastPct,
+					Status:  lastStatus,
+					Size:    size,
+				}
+			case err := <-doneCh:
+				size := int64(0)
+				if sizeFunc != nil {
+					size = sizeFunc()
+				}
+				out <- components.OperationProgressMsg{
+					Done: true, Err: err,
+					Percent: lastPct, Size: size,
+				}
+				return
+			case <-ticker.C:
+				if sizeFunc != nil {
+					size := sizeFunc()
+					out <- components.OperationProgressMsg{
+						Percent: lastPct,
+						Status:  lastStatus,
+						Size:    size,
+					}
+				}
+			}
 		}
-		return archiveTickMsg{prog: p, progCh: progCh, doneCh: doneCh}
-	case err := <-doneCh:
-		return archiveFinishedMsg{err: err}
-	}
+	}()
+	return out
 }
 
-func readRestoreProgress(progCh <-chan archive.ProgressMsg, doneCh <-chan error) tea.Msg {
-	select {
-	case p, ok := <-progCh:
-		if !ok {
-			return restoreFinishedMsg{err: <-doneCh}
+// verifyToCh wraps the synchronous archive.Verify into a OperationProgressMsg channel.
+func verifyToCh(ctx context.Context, szPath, archivePath string) <-chan components.OperationProgressMsg {
+	out := make(chan components.OperationProgressMsg, 1)
+	go func() {
+		defer close(out)
+		err := archive.Verify(szPath, archivePath)
+		if ctx.Err() != nil {
+			err = ctx.Err()
 		}
-		return restoreTickMsg{prog: p, progCh: progCh, doneCh: doneCh}
-	case err := <-doneCh:
-		return restoreFinishedMsg{err: err}
-	}
+		out <- components.OperationProgressMsg{Done: true, Err: err}
+	}()
+	return out
 }
 
 func (m BackupModel) View() string {
+	if m.state == backupStateOperation {
+		return m.opScreen.View()
+	}
+
 	var b strings.Builder
 	b.WriteString(style.StyleTitle.Render("Backup Manager") + "\n\n")
 
@@ -560,16 +550,6 @@ func (m BackupModel) View() string {
 		}
 		b.WriteString("\n" + style.KeyHint("enter", "select") + "  " + style.KeyHint("esc", "back"))
 
-	case backupStateCreating:
-		b.WriteString(style.StyleBody.Render(m.spinner.View()+" Creating backup…") + "\n")
-		b.WriteString(style.StyleMuted.Render("Archive: "+formatBytes(m.archiveSize)) + "\n")
-		b.WriteString(m.bar.ViewAs(m.curPct) + "\n")
-		if m.curFile != "" {
-			const label = "  Processing: "
-			maxPath := m.width - len(label)
-			b.WriteString(style.StyleMuted.Render(label+truncateLeft(m.curFile, maxPath)) + "\n")
-		}
-
 	case backupStatePickMod:
 		b.WriteString(style.StyleMuted.Render("Archive: "+m.selectedBak.Name) + "\n")
 		b.WriteString(m.modPicker.View())
@@ -580,16 +560,6 @@ func (m BackupModel) View() string {
 			m.selectedMod, m.selectedBak.Name,
 		)) + "\n\n")
 		b.WriteString(style.KeyHint("y/enter", "yes") + "  " + style.KeyHint("n/esc", "no"))
-
-	case backupStateRestoring:
-		b.WriteString(style.StyleBody.Render(m.spinner.View()+" Restoring "+m.selectedMod+"…") + "\n")
-		b.WriteString(style.StyleMuted.Render("Mod: "+formatBytes(m.restoreSize)) + "\n")
-		b.WriteString(m.bar.ViewAs(m.curPct) + "\n")
-		if m.curFile != "" {
-			const label = "  Processing: "
-			maxPath := m.width - len(label)
-			b.WriteString(style.StyleMuted.Render(label+truncateLeft(m.curFile, maxPath)) + "\n")
-		}
 
 	case backupStateRestoreDone:
 		if m.errMsg != "" {
@@ -607,16 +577,6 @@ func (m BackupModel) View() string {
 		)) + "\n\n")
 		b.WriteString(style.KeyHint("y/enter", "yes") + "  " + style.KeyHint("n/esc", "no"))
 
-	case backupStateRestoringAll:
-		b.WriteString(style.StyleBody.Render(m.spinner.View()+" Restoring all mods…") + "\n")
-		b.WriteString(style.StyleMuted.Render("Mods dir: "+formatBytes(m.restoreSize)) + "\n")
-		b.WriteString(m.bar.ViewAs(m.curPct) + "\n")
-		if m.curFile != "" {
-			const label = "  Processing: "
-			maxPath := m.width - len(label)
-			b.WriteString(style.StyleMuted.Render(label+truncateLeft(m.curFile, maxPath)) + "\n")
-		}
-
 	case backupStateRestoringAllDone:
 		if m.errMsg != "" {
 			b.WriteString(style.StyleDanger.Render("Error: "+m.errMsg) + "\n")
@@ -624,9 +584,6 @@ func (m BackupModel) View() string {
 			b.WriteString(style.StyleSuccess.Render(m.statusMsg) + "\n")
 		}
 		b.WriteString("\n" + style.KeyHint("any key", "back"))
-
-	case backupStateVerifying:
-		b.WriteString(style.StyleBody.Render("Verifying "+m.selectedBak.Name+"…") + "\n")
 
 	case backupStateConfirmDelete:
 		b.WriteString(style.StyleWarning.Render(
@@ -640,20 +597,6 @@ func (m BackupModel) View() string {
 func (m *BackupModel) SetSize(w, h int) {
 	m.width = w
 	m.height = h
-	m.bar.Width = w - 4
 	m.modPicker.SetSize(w-4, h-6)
-}
-
-// truncateLeft shortens s from the left to maxLen, prefixing "..." if truncated.
-func truncateLeft(s string, maxLen int) string {
-	if maxLen <= 0 {
-		return ""
-	}
-	if len(s) <= maxLen {
-		return s
-	}
-	if maxLen <= 3 {
-		return s[len(s)-maxLen:]
-	}
-	return "..." + s[len(s)-(maxLen-3):]
+	m.opScreen.SetSize(w, h)
 }

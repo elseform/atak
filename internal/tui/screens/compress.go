@@ -7,46 +7,34 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/bubbles/progress"
 	"github.com/noisethanks/stalker-tex/internal/compress"
 	"github.com/noisethanks/stalker-tex/internal/config"
 	"github.com/noisethanks/stalker-tex/internal/scan"
 	"github.com/noisethanks/stalker-tex/internal/tools"
+	"github.com/noisethanks/stalker-tex/internal/tui/components"
 	"github.com/noisethanks/stalker-tex/internal/tui/style"
 )
 
-// compressionDoneMsg carries one result and the channel for the next.
-type compressionDoneMsg struct {
-	result compress.CompressionResult
-	ch     <-chan compress.CompressionResult
+// compressReadyMsg is returned once RunPool and channel bridges are set up.
+type compressReadyMsg struct {
+	opCh  <-chan components.OperationProgressMsg
+	sumCh <-chan SummaryData
 }
 
-// compressAllDoneMsg signals all jobs are finished.
-type compressAllDoneMsg struct{}
-
-// CompressModel shows a progress bar and live log during compression.
+// CompressModel shows a shared OperationScreen during compression.
 type CompressModel struct {
-	data        CompressJobData
-	cfg         *config.Config
-	tools       *tools.EmbeddedTools
-	progress    progress.Model
-	ctx         context.Context
-	cancel      context.CancelFunc
-	total       int
-	done        int
-	succeeded   int
-	failed      int
-	currentFile string
-	log         []string
-	errors      []string
-	finished    bool
-	totalBefore int64
-	totalAfter  int64
-	width       int
-	height      int
+	data      CompressJobData
+	cfg       *config.Config
+	tools     *tools.EmbeddedTools
+	ctx       context.Context
+	cancel    context.CancelFunc
+	total     int
+	opScreen  components.OperationScreen
+	summaryCh <-chan SummaryData
+	ready     bool
+	width     int
+	height    int
 }
-
-const maxLogLines = 6
 
 func NewCompress(data CompressJobData, cfg *config.Config, t *tools.EmbeddedTools) CompressModel {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -54,15 +42,13 @@ func NewCompress(data CompressJobData, cfg *config.Config, t *tools.EmbeddedTool
 	for _, g := range data.Groups {
 		total += len(g.Paths)
 	}
-	bar := progress.New(progress.WithDefaultGradient())
 	return CompressModel{
-		data:     data,
-		cfg:      cfg,
-		tools:    t,
-		progress: bar,
-		ctx:      ctx,
-		cancel:   cancel,
-		total:    total,
+		data:   data,
+		cfg:    cfg,
+		tools:  t,
+		ctx:    ctx,
+		cancel: cancel,
+		total:  total,
 	}
 }
 
@@ -78,103 +64,100 @@ func (m CompressModel) startCompression() tea.Cmd {
 	texconvPath := m.tools.TexconvPath
 	cfg := m.cfg
 	ctx := m.ctx
+	total := m.total
 	return func() tea.Msg {
 		jobs := buildJobs(data, cfg)
-		ch := compress.RunPool(ctx, texconvPath, jobs, data.WorkerCount, cfg)
-		return readNextResult(ch)
+		resultCh := compress.RunPool(ctx, texconvPath, jobs, data.WorkerCount, cfg)
+		opCh, sumCh := compressToOpCh(resultCh, total)
+		return compressReadyMsg{opCh: opCh, sumCh: sumCh}
 	}
-}
-
-func readNextResult(ch <-chan compress.CompressionResult) tea.Msg {
-	r, ok := <-ch
-	if !ok {
-		return compressAllDoneMsg{}
-	}
-	return compressionDoneMsg{result: r, ch: ch}
 }
 
 func (m CompressModel) Update(msg tea.Msg) (CompressModel, tea.Cmd) {
-	switch msg := msg.(type) {
-	case compressionDoneMsg:
-		r := msg.result
-		m.done++
-		m.totalBefore += r.Before
-		m.totalAfter += r.After
-		if r.Success {
-			m.succeeded++
-			m.currentFile = filepath.Base(r.Asset.Path)
-			m.addLog(style.StyleSuccess.Render("✓ ") + m.currentFile)
-		} else {
-			m.failed++
-			errLine := fmt.Sprintf("%s: %v", filepath.Base(r.Asset.Path), r.Err)
-			if r.Stderr != "" {
-				errLine += "\n  " + strings.TrimSpace(r.Stderr)
+	if m.ready {
+		var cmd tea.Cmd
+		m.opScreen, cmd = m.opScreen.Update(msg)
+		if m.opScreen.IsDone() {
+			sumCh := m.summaryCh
+			return m, func() tea.Msg {
+				data := <-sumCh
+				return NavigateMsg{To: NavSummary, Data: data}
 			}
-			m.errors = append(m.errors, errLine)
-			m.addLog(style.StyleDanger.Render("✗ ") + errLine)
 		}
-
-		pct := float64(m.done) / float64(max(1, m.total))
-		progressCmd := m.progress.SetPercent(pct)
-
-		ch := msg.ch
-		next := func() tea.Msg { return readNextResult(ch) }
-		return m, tea.Batch(progressCmd, next)
-
-	case compressAllDoneMsg:
-		m.finished = true
-		summary := SummaryData{
-			Succeeded:   m.succeeded,
-			Failed:      m.failed,
-			TotalBefore: m.totalBefore,
-			TotalAfter:  m.totalAfter,
-			Errors:      m.errors,
-		}
-		return m, func() tea.Msg { return NavigateMsg{To: NavSummary, Data: summary} }
-
-	case progress.FrameMsg:
-		updated, cmd := m.progress.Update(msg)
-		m.progress = updated.(progress.Model)
 		return m, cmd
+	}
+
+	if msg, ok := msg.(compressReadyMsg); ok {
+		m.opScreen = components.NewOperationScreen("Compressing Textures…", msg.opCh, m.cancel)
+		m.opScreen.SetSize(m.width, m.height)
+		m.summaryCh = msg.sumCh
+		m.ready = true
+		return m, m.opScreen.Init()
 	}
 
 	return m, nil
 }
 
-func (m *CompressModel) addLog(line string) {
-	m.log = append(m.log, line)
-	if len(m.log) > maxLogLines {
-		m.log = m.log[len(m.log)-maxLogLines:]
-	}
-}
-
 func (m CompressModel) View() string {
-	var b strings.Builder
-	b.WriteString(style.StyleTitle.Render("Compressing Textures") + "\n\n")
-
-	pct := float64(m.done) / float64(max(1, m.total))
-	b.WriteString(m.progress.ViewAs(pct) + "\n")
-	b.WriteString(style.StyleBody.Render(fmt.Sprintf(
-		"%d / %d  (%d errors)",
-		m.done, m.total, m.failed,
-	)) + "\n\n")
-
-	if m.currentFile != "" {
-		b.WriteString(style.StyleMuted.Render("Current: "+m.currentFile) + "\n\n")
+	if !m.ready {
+		return style.StyleTitle.Render("Compressing Textures") + "\n\nStarting…"
 	}
-
-	for _, l := range m.log {
-		b.WriteString("  " + l + "\n")
-	}
-
-	b.WriteString("\n" + style.StyleMuted.Render("Running…  ctrl+c to abort (partial results saved)"))
-	return b.String()
+	return m.opScreen.View()
 }
 
 func (m *CompressModel) SetSize(w, h int) {
 	m.width = w
 	m.height = h
-	m.progress.Width = w - 4
+	m.opScreen.SetSize(w, h)
+}
+
+// compressToOpCh bridges compress.CompressionResult into OperationProgressMsg.
+// It accumulates per-file stats and errors, sends progress on opCh, and delivers
+// SummaryData on sumCh before closing opCh (guaranteeing sumCh is readable on Done).
+func compressToOpCh(
+	resultCh <-chan compress.CompressionResult,
+	total int,
+) (<-chan components.OperationProgressMsg, <-chan SummaryData) {
+	opCh := make(chan components.OperationProgressMsg, 32)
+	sumCh := make(chan SummaryData, 1)
+	go func() {
+		var done, succeeded, failed int
+		var totalBefore, totalAfter int64
+		var errors []string
+		for r := range resultCh {
+			done++
+			totalBefore += r.Before
+			totalAfter += r.After
+			if r.Success {
+				succeeded++
+			} else {
+				failed++
+				errLine := fmt.Sprintf("%s: %v", filepath.Base(r.Asset.Path), r.Err)
+				if r.Stderr != "" {
+					errLine += "\n  " + strings.TrimSpace(r.Stderr)
+				}
+				errors = append(errors, errLine)
+			}
+			saved := totalBefore - totalAfter
+			if saved < 0 {
+				saved = 0
+			}
+			opCh <- components.OperationProgressMsg{
+				Percent: done * 100 / max(1, total),
+				Status:  filepath.Base(r.Asset.Path),
+				Size:    saved,
+			}
+		}
+		sumCh <- SummaryData{
+			Succeeded:   succeeded,
+			Failed:      failed,
+			TotalBefore: totalBefore,
+			TotalAfter:  totalAfter,
+			Errors:      errors,
+		}
+		close(opCh)
+	}()
+	return opCh, sumCh
 }
 
 // buildJobs converts ConfiguredGroups into compress.Jobs.
