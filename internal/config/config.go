@@ -26,13 +26,11 @@ type profileFile struct {
 
 // Config holds all user-persisted preferences.
 type Config struct {
-	ModsDir         string   `json:"modsDir"`
-	BackupDir       string   `json:"backupDir"`
-	WorkerCount     int      `json:"workerCount"`
-	CompressInPlace bool     `json:"compressInPlace"`
-	BackupLevel     int      `json:"backupLevel,omitempty"`
-	StagingDir      string   `json:"stagingDir,omitempty"`
-	ScanExclusions  []string `json:"scanExclusions,omitempty"`
+	ModsDir        string   `json:"modsDir"`
+	BackupDir      string   `json:"backupDir"`
+	WorkerCount    int      `json:"workerCount"`
+	BackupLevel    int      `json:"backupLevel,omitempty"`
+	ScanExclusions []string `json:"scanExclusions,omitempty"`
 }
 
 func configDir() (string, error) {
@@ -132,11 +130,10 @@ func LoadProfiles() ([]Profile, bool, error) {
 
 func defaultConfig() *Config {
 	return &Config{
-		ModsDir:         detectModsDir(),
-		WorkerCount:     max(1, runtime.NumCPU()/2),
-		CompressInPlace: true,
-		BackupLevel:     6,
-		ScanExclusions:  []string{".*", "downloads", "Downloads"},
+		ModsDir:        detectModsDir(),
+		WorkerCount:    max(1, runtime.NumCPU()/4),
+		BackupLevel:    6,
+		ScanExclusions: []string{".*", "downloads", "Downloads"},
 	}
 }
 

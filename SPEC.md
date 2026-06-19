@@ -186,10 +186,11 @@ stalker-tex/
 │           ├── about.go        # about + third-party licenses screen
 │           ├── backup.go       # backup manager — all archive ops including restore
 │           ├── scan.go         # scanning spinner + live counter
-│           ├── results.go      # scan results list, per-category breakdown
-│           ├── compress.go     # execution screen, progress bar, live log
-│           └── summary.go      # completion stats, error list, retry option
+│           ├── results.go      # scan results + compression launcher (enter/r/m)
+│           ├── compress.go     # execution screen using OperationScreen component
+│           └── summary.go      # completion stats, error list
 │           # restore.go removed — functionality absorbed into backup.go
+│           # compress_config.go removed — replaced by results.go keybindings
 └── SPEC.md                  # this file
 ```
 
@@ -231,10 +232,29 @@ means verify gets a progress indicator for free.
 Welcome / Path Config
         │
         ▼
-   Main Menu ◄──────────────────────────┐
-   ├── Scan & Compress                  │
-   ├── Backup Manager                   │
-   └── Settings                         │
+   Main Menu ◄──────────────────────────────────────┐
+   ├── Scan & Compress                               │
+   ├── Backup Manager                                │
+   ├── Settings                                      │
+   └── About                                         │
+        │
+        ▼
+   Scanning... (async, live counter)
+        │
+        ▼
+   Scan Results ────────────────────────────────────►─┐
+   [enter] Run Selected Profile                        │
+   [r]     Run All                                     │
+   [m]     Run Selected Mod → ModPicker → Compress     │
+   [q]     Main Menu                                   │
+        │                                              │
+        ▼                                              │
+   Compressing... (OperationScreen)                    │
+        │                                              │
+        ▼                                              │
+   Summary ─────────────────────────────────────────►─┘
+        │
+        └──────────────────────────────► Main Menu
         │                               │
    ┌────┴────────────────────────┐      │
    │                             │      │
@@ -444,35 +464,25 @@ Surfaced in the Settings screen as an editable list — users can add or remove 
 
 ### 4. Compress
 
-#### Compression Config Screen
+#### Compression — No Config Screen
 
-Format and mip settings are defined entirely in `profiles.json` — they are NOT
-overridable in the UI. The compression config screen is a confirmation step only,
-not a settings screen.
-
-**What the config screen shows:**
-- Summary of files to be compressed (count per profile bucket)
-- Worker count (read from config, display only — edit in Settings)
-- In-place vs staging directory (read from config, display only — edit in Settings)
-- Three run scope options:
+There is no separate compression config screen. The scan results screen is the
+compression launcher. All compression is initiated directly from scan results
+via keybindings:
 
 ```
-Run Scope:
-  > Run All               ← compress all 2222 files across all profiles
-    Run Selected Profile  ← pick one profile bucket (e.g. Normal Maps only)
-    Run Selected Mod      ← pick one mod, compress its files across all profiles
+Scan Results keybindings:
+  [enter]   run selected profile (whichever profile row is highlighted)
+  [r]       run all profiles
+  [m]       run selected mod — opens ModPicker, then compresses that mod only
+  [q]       back to main menu
 ```
 
-**Run Selected Mod** is the recommended first-time workflow — compress one small
-mod, verify it looks correct in game, then run all. Surface this recommendation
-in the UI.
+**Run Selected Mod** is the recommended first-time workflow — surface this in
+the scan results screen as a hint: "Press [m] to compress a single mod first".
 
-The mod picker for "Run Selected Mod" is identical in behavior to the restore
-screen's mod list — a searchable, fuzzy-filtered list of mod names. Extract this
-into a shared component at `internal/tui/components/modpicker.go` so both screens
-use the same implementation. The mod list is populated from `asset.ModName` values
-in the current scan results. On selection, assets are filtered to the chosen mod
-before being passed to the compression worker pool:
+The mod picker for [m] uses the shared `ModPicker` component. On selection,
+assets are filtered to the chosen mod before passing to the worker pool:
 
 ```go
 filtered := []scan.Asset{}
@@ -481,13 +491,11 @@ for _, a := range allAssets {
         filtered = append(filtered, a)
     }
 }
-// pass filtered to worker pool
 ```
 
-**What the config screen does NOT have:**
-- Per-profile format picker (format comes from profiles.json)
-- Per-profile mip toggle (generateMips comes from profiles.json)
-- In-place toggle (global setting, lives in Settings screen only)
+`internal/tui/screens/compress_config.go` is deleted — its functionality is
+absorbed into `results.go` keybindings. The `compress.go` execution screen
+remains — it is still needed to show the OperationScreen during compression.
 
 #### Compression Execution
 
@@ -595,9 +603,15 @@ func setProcAttr(cmd *exec.Cmd)   // set process attributes before Start()
     ```
   - Validated on input — reject values outside 1-9, non-numeric input reverts to previous value
   - All other 7z flags (`-mfb=64 -md=32m -ms=on -xr!downloads -xr!Downloads`) are hardcoded, not user-exposed
-- Worker thread count for texture compression (default: `max(1, runtime.NumCPU()/2)`)
-- Whether to compress textures in-place or to a staging directory
-  (this is the only place this toggle exists — not in the compression config screen)
+- Worker thread count for texture compression (default: `max(1, runtime.NumCPU()/4)`)
+  - Intentionally conservative — each worker is a full texconv process, N workers
+    = N cores pegged. Users can increase if their system handles it.
+  - On a 16-thread CPU: default 4 workers. On 8-thread: default 2 workers.
+  - Settings screen should note: "Increase if compression feels slow, decrease
+    if your system becomes unresponsive"
+- Compression is always in-place — no staging directory option
+  - The backup system is the safety net; restore from backup if needed
+  - Removes user confusion and config complexity
 - Scan exclusions — editable list of glob patterns, default: `[".*", "downloads", "Downloads"]`
 - Persist to `os.UserConfigDir()/stalker-tex/config.json`
 
@@ -607,11 +621,13 @@ Full config.json schema:
   "modsDir": "/home/user/GAMMA/mods",
   "backupDir": "/home/user/GAMMA/backup",
   "workerCount": 4,
-  "compressInPlace": true,
   "backupLevel": 6,
   "scanExclusions": [".*", "downloads", "Downloads"]
 }
 ```
+
+Compression is always in-place. No staging directory. The backup system is the
+safety net — users restore from backup if compression results are unsatisfactory.
 
 ---
 

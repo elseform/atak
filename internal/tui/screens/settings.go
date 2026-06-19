@@ -1,7 +1,6 @@
 package screens
 
 import (
-	"fmt"
 	"runtime"
 	"strconv"
 	"strings"
@@ -19,20 +18,17 @@ const (
 	fieldBackupDir
 	fieldWorkers
 	fieldBackupLevel
-	fieldInPlace
-	fieldStagingDir
 	fieldCount
 )
 
 // SettingsModel handles configuring user preferences.
 type SettingsModel struct {
-	cfg       *config.Config
-	inputs    [4]textinput.Model // mods, backup, workers, backup-level
-	inPlace   bool
-	focused   settingsField
-	errMsg    string
-	width     int
-	height    int
+	cfg     *config.Config
+	inputs  [4]textinput.Model // mods, backup, workers, backup-level
+	focused settingsField
+	errMsg  string
+	width   int
+	height  int
 }
 
 func NewSettings(cfg *config.Config) SettingsModel {
@@ -56,7 +52,6 @@ func NewSettings(cfg *config.Config) SettingsModel {
 	return SettingsModel{
 		cfg:     cfg,
 		inputs:  [4]textinput.Model{mods, backup, workers, backupLvl},
-		inPlace: cfg.CompressInPlace,
 		focused: fieldModsDir,
 	}
 }
@@ -73,10 +68,6 @@ func (m SettingsModel) Update(msg tea.Msg) (SettingsModel, tea.Cmd) {
 		case "shift+tab", "up":
 			m.focused = (m.focused + fieldCount - 1) % fieldCount
 			m.refocus()
-		case " ":
-			if m.focused == fieldInPlace {
-				m.inPlace = !m.inPlace
-			}
 		case "enter":
 			return m.save()
 		case "esc", "q":
@@ -117,7 +108,7 @@ func (m *SettingsModel) refocus() {
 func (m SettingsModel) save() (SettingsModel, tea.Cmd) {
 	workers, err := strconv.Atoi(strings.TrimSpace(m.inputs[2].Value()))
 	if err != nil || workers < 1 {
-		workers = max(1, runtime.NumCPU()/2)
+		workers = max(1, runtime.NumCPU()/4)
 	}
 	backupLevel, err := strconv.Atoi(strings.TrimSpace(m.inputs[3].Value()))
 	if err != nil || backupLevel < 1 || backupLevel > 9 {
@@ -128,7 +119,6 @@ func (m SettingsModel) save() (SettingsModel, tea.Cmd) {
 	updated.BackupDir = strings.TrimSpace(m.inputs[1].Value())
 	updated.WorkerCount = workers
 	updated.BackupLevel = backupLevel
-	updated.CompressInPlace = m.inPlace
 	return m, func() tea.Msg {
 		return NavigateMsg{To: NavSaveConfig, Data: &updated}
 	}
@@ -146,7 +136,7 @@ func (m SettingsModel) View() string {
 	}{
 		{"GAMMA Mods Directory", fieldModsDir, m.inputs[0].View(), ""},
 		{"Backup Directory", fieldBackupDir, m.inputs[1].View(), ""},
-		{"Worker Threads", fieldWorkers, m.inputs[2].View(), ""},
+		{"Worker Threads", fieldWorkers, m.inputs[2].View(), "Conservative default (CPU/4). Increase if compression feels slow and your system has headroom."},
 		{"Backup Compression Level", fieldBackupLevel, m.inputs[3].View(),
 			"1–9  ·  3 = Fast  ·  6 = Balanced (default)  ·  9 = Maximum"},
 	}
@@ -163,23 +153,11 @@ func (m SettingsModel) View() string {
 		b.WriteString("\n")
 	}
 
-	// In-place toggle.
-	inPlaceLabel := style.StyleBody.Render("Compress In-Place")
-	if m.focused == fieldInPlace {
-		inPlaceLabel = style.StyleSelected.Render("Compress In-Place")
-	}
-	inPlaceVal := "off"
-	if m.inPlace {
-		inPlaceVal = style.StyleSuccess.Render("on")
-	}
-	b.WriteString(inPlaceLabel + "  " + inPlaceVal + "\n\n")
-
 	if m.errMsg != "" {
 		b.WriteString(style.StyleDanger.Render(m.errMsg) + "\n\n")
 	}
 
 	b.WriteString(style.KeyHint("tab", "next") + "  ")
-	b.WriteString(fmt.Sprintf("%s  ", style.KeyHint("space", "toggle")))
 	b.WriteString(style.KeyHint("enter", "save") + "  ")
 	b.WriteString(style.KeyHint("q", "cancel"))
 	return b.String()

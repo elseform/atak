@@ -5,6 +5,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/noisethanks/stalker-tex/internal/config"
+	"github.com/noisethanks/stalker-tex/internal/scan"
 	"github.com/noisethanks/stalker-tex/internal/tools"
 	"github.com/noisethanks/stalker-tex/internal/tui/screens"
 )
@@ -18,7 +19,6 @@ const (
 	ScreenMenu
 	ScreenScan
 	ScreenResults
-	ScreenCompressConfig
 	ScreenCompress
 	ScreenSummary
 	ScreenBackup
@@ -38,18 +38,20 @@ type AppModel struct {
 	width     int
 	height    int
 
+	scanAssets  []scan.Asset
+	scanSkipped int
+
 	// Screens.
-	welcome      screens.WelcomeModel
-	firstrun     screens.FirstRunModel
-	about        screens.AboutModel
-	menu         screens.MenuModel
-	scanScreen   screens.ScanModel
-	results      screens.ResultsModel
-	compConfig   screens.CompressConfigModel
-	compress     screens.CompressModel
-	summary      screens.SummaryModel
-	backup       screens.BackupModel
-	settings     screens.SettingsModel
+	welcome    screens.WelcomeModel
+	firstrun   screens.FirstRunModel
+	about      screens.AboutModel
+	menu       screens.MenuModel
+	scanScreen screens.ScanModel
+	results    screens.ResultsModel
+	compress   screens.CompressModel
+	summary    screens.SummaryModel
+	backup     screens.BackupModel
+	settings   screens.SettingsModel
 }
 
 // New creates the root model.
@@ -79,7 +81,6 @@ func (m *AppModel) initScreens() {
 	m.firstrun = screens.NewFirstRun(cfgDir)
 	m.about = screens.NewAbout(m.version, tools.LicenseText)
 	m.menu = screens.NewMenu()
-	m.compConfig = screens.NewCompressConfig(screens.CompressConfigData{}, m.cfg)
 	m.backup = screens.NewBackup(m.cfg, m.tools)
 	m.settings = screens.NewSettings(m.cfg)
 }
@@ -141,8 +142,6 @@ func (m AppModel) View() string {
 		return m.scanScreen.View()
 	case ScreenResults:
 		return m.results.View()
-	case ScreenCompressConfig:
-		return m.compConfig.View()
 	case ScreenCompress:
 		return m.compress.View()
 	case ScreenSummary:
@@ -171,8 +170,6 @@ func (m AppModel) delegateUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.scanScreen, cmd = m.scanScreen.Update(msg)
 	case ScreenResults:
 		m.results, cmd = m.results.Update(msg)
-	case ScreenCompressConfig:
-		m.compConfig, cmd = m.compConfig.Update(msg)
 	case ScreenCompress:
 		m.compress, cmd = m.compress.Update(msg)
 	case ScreenSummary:
@@ -194,7 +191,6 @@ func (m AppModel) propagateSize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 	m.menu.SetSize(msg.Width, msg.Height)
 	m.scanScreen.SetSize(msg.Width, msg.Height)
 	m.results.SetSize(msg.Width, msg.Height)
-	m.compConfig.SetSize(msg.Width, msg.Height)
 	m.compress.SetSize(msg.Width, msg.Height)
 	m.summary.SetSize(msg.Width, msg.Height)
 	m.backup.SetSize(msg.Width, msg.Height)
@@ -218,18 +214,17 @@ func (m AppModel) handleNavigate(msg screens.NavigateMsg) (tea.Model, tea.Cmd) {
 		return m, m.scanScreen.Init()
 
 	case screens.NavResults:
-		data, _ := msg.Data.(screens.ScanResultData)
+		if data, ok := msg.Data.(screens.ScanResultData); ok {
+			m.scanAssets = data.Assets
+			m.scanSkipped = data.Skipped
+		}
 		m.screen = ScreenResults
-		m.results = screens.NewResults(data, m.cfg)
+		m.results = screens.NewResults(screens.ScanResultData{
+			Assets:  m.scanAssets,
+			Skipped: m.scanSkipped,
+		}, m.cfg)
 		m.results.SetSize(m.width, m.height)
 		return m, m.results.Init()
-
-	case screens.NavCompressConfig:
-		data, _ := msg.Data.(screens.CompressConfigData)
-		m.screen = ScreenCompressConfig
-		m.compConfig = screens.NewCompressConfig(data, m.cfg)
-		m.compConfig.SetSize(m.width, m.height)
-		return m, m.compConfig.Init()
 
 	case screens.NavCompress:
 		data, _ := msg.Data.(screens.CompressJobData)

@@ -2,10 +2,8 @@ package compress
 
 import (
 	"context"
-	"path/filepath"
 	"sync"
 
-	"github.com/noisethanks/stalker-tex/internal/config"
 	"github.com/noisethanks/stalker-tex/internal/scan"
 )
 
@@ -19,7 +17,7 @@ type Job struct {
 
 // RunPool executes jobs concurrently using workerCount goroutines.
 // Results are sent to the returned channel, which is closed when all jobs complete.
-func RunPool(ctx context.Context, texconvPath string, jobs []Job, workerCount int, cfg *config.Config) <-chan CompressionResult {
+func RunPool(ctx context.Context, texconvPath string, jobs []Job, workerCount int) <-chan CompressionResult {
 	results := make(chan CompressionResult, len(jobs))
 	work := make(chan Job, len(jobs))
 
@@ -39,11 +37,7 @@ func RunPool(ctx context.Context, texconvPath string, jobs []Job, workerCount in
 					return
 				default:
 				}
-				outDir := job.OutputDir
-				if outDir == "" {
-					outDir = outputDir(job.Asset, cfg)
-				}
-				results <- Run(ctx, texconvPath, job.Asset, job.Format, job.GenerateMips, outDir)
+				results <- Run(ctx, texconvPath, job.Asset, job.Format, job.GenerateMips, job.OutputDir)
 			}
 		}()
 	}
@@ -54,11 +48,4 @@ func RunPool(ctx context.Context, texconvPath string, jobs []Job, workerCount in
 	}()
 
 	return results
-}
-
-func outputDir(asset scan.Asset, cfg *config.Config) string {
-	if cfg.CompressInPlace {
-		return filepath.Dir(asset.Path)
-	}
-	return cfg.StagingDir
 }

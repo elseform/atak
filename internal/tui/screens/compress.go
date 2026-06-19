@@ -62,12 +62,11 @@ func (m CompressModel) Init() tea.Cmd {
 func (m CompressModel) startCompression() tea.Cmd {
 	data := m.data
 	texconvPath := m.tools.TexconvPath
-	cfg := m.cfg
 	ctx := m.ctx
 	total := m.total
 	return func() tea.Msg {
-		jobs := buildJobs(data, cfg)
-		resultCh := compress.RunPool(ctx, texconvPath, jobs, data.WorkerCount, cfg)
+		jobs := buildJobs(data)
+		resultCh := compress.RunPool(ctx, texconvPath, jobs, data.WorkerCount)
 		opCh, sumCh := compressToOpCh(resultCh, total)
 		return compressReadyMsg{opCh: opCh, sumCh: sumCh}
 	}
@@ -161,22 +160,15 @@ func compressToOpCh(
 }
 
 // buildJobs converts ConfiguredGroups into compress.Jobs.
-func buildJobs(data CompressJobData, cfg *config.Config) []compress.Job {
-	_ = cfg
+func buildJobs(data CompressJobData) []compress.Job {
 	var jobs []compress.Job
 	for _, g := range data.Groups {
 		for _, path := range g.Paths {
-			outDir := g.OutputDir
-			if outDir == "" {
-				outDir = filepath.Dir(path)
-			}
 			jobs = append(jobs, compress.Job{
-				Asset: scan.Asset{
-					Path: path,
-				},
+				Asset:        scan.Asset{Path: path},
 				Format:       g.Format,
 				GenerateMips: g.GenerateMips,
-				OutputDir:    outDir,
+				OutputDir:    filepath.Dir(path),
 			})
 		}
 	}

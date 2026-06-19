@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 
 	"github.com/noisethanks/stalker-tex/internal/scan"
+	"github.com/noisethanks/stalker-tex/internal/tools"
 )
 
 // CompressionResult holds the outcome of a single texconv invocation.
@@ -41,11 +42,29 @@ func Run(ctx context.Context, texconvPath string, asset scan.Asset, format strin
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
 		return CompressionResult{Asset: asset, Success: false, Err: err}
 	}
-	cmd := exec.CommandContext(ctx, texconvPath, args...)
+	cmd := exec.Command(texconvPath, args...)
+	tools.SetProcAttr(cmd)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
-	err := cmd.Run()
+	if err := cmd.Start(); err != nil {
+		return CompressionResult{Asset: asset, Success: false, Err: err}
+	}
+	_ = tools.WriteLock(cmd.Process.Pid)
+
+	processExited := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			tools.KillProcess(cmd)
+		case <-processExited:
+		}
+	}()
+
+	err := cmd.Wait()
+	close(processExited)
+	_ = tools.ClearLock()
+
 	if ctx.Err() != nil {
 		outPath := filepath.Join(outputDir, filepath.Base(asset.Path))
 		os.Remove(outPath)

@@ -20,6 +20,8 @@ func main() {
 	}
 	defer t.Cleanup()
 
+	tools.CheckStaleLock()
+
 	firstRun := config.IsFirstRun()
 
 	cfg, err := config.Load()

@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/noisethanks/stalker-tex/internal/tools"
 )
 
 // BackupInfo describes a discovered backup archive.
@@ -74,7 +76,8 @@ func Backup(ctx context.Context, sevenZipPath, modsDir, outputPath string, backu
 			"-xr!downloads",
 			"-xr!Downloads",
 		}
-		cmd := exec.CommandContext(ctx, sevenZipPath, args...)
+		cmd := exec.Command(sevenZipPath, args...)
+		tools.SetProcAttr(cmd)
 		stderr, err := cmd.StderrPipe()
 		if err != nil {
 			done <- err
@@ -84,6 +87,16 @@ func Backup(ctx context.Context, sevenZipPath, modsDir, outputPath string, backu
 			done <- err
 			return
 		}
+		_ = tools.WriteLock(cmd.Process.Pid)
+
+		processExited := make(chan struct{})
+		go func() {
+			select {
+			case <-ctx.Done():
+				tools.KillProcess(cmd)
+			case <-processExited:
+			}
+		}()
 
 		scanner := bufio.NewScanner(stderr)
 		for scanner.Scan() {
@@ -94,6 +107,9 @@ func Backup(ctx context.Context, sevenZipPath, modsDir, outputPath string, backu
 		}
 
 		err = cmd.Wait()
+		close(processExited)
+		_ = tools.ClearLock()
+
 		if ctx.Err() != nil {
 			os.Remove(outputPath)
 			done <- ctx.Err()
@@ -164,7 +180,8 @@ func RestoreAll(ctx context.Context, sevenZipPath, archivePath, modsParentDir st
 			"-y",
 			"-bsp1",
 		}
-		cmd := exec.CommandContext(ctx, sevenZipPath, args...)
+		cmd := exec.Command(sevenZipPath, args...)
+		tools.SetProcAttr(cmd)
 		stderr, err := cmd.StderrPipe()
 		if err != nil {
 			done <- err
@@ -174,6 +191,16 @@ func RestoreAll(ctx context.Context, sevenZipPath, archivePath, modsParentDir st
 			done <- err
 			return
 		}
+		_ = tools.WriteLock(cmd.Process.Pid)
+
+		processExited := make(chan struct{})
+		go func() {
+			select {
+			case <-ctx.Done():
+				tools.KillProcess(cmd)
+			case <-processExited:
+			}
+		}()
 
 		scanner := bufio.NewScanner(stderr)
 		for scanner.Scan() {
@@ -183,7 +210,10 @@ func RestoreAll(ctx context.Context, sevenZipPath, archivePath, modsParentDir st
 			}
 		}
 
-		done <- cmd.Wait()
+		err = cmd.Wait()
+		close(processExited)
+		_ = tools.ClearLock()
+		done <- err
 	}()
 
 	return progress, done
@@ -193,7 +223,9 @@ func RestoreAll(ctx context.Context, sevenZipPath, archivePath, modsParentDir st
 // Uses technical listing format (one property per line) to handle spaces in paths
 // and mods without explicit directory entries.
 func ListMods(sevenZipPath, archivePath string) ([]string, error) {
-	out, err := exec.Command(sevenZipPath, "l", "-slt", archivePath).Output()
+	cmd := exec.Command(sevenZipPath, "l", "-slt", archivePath)
+	tools.SetProcAttr(cmd)
+	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("7zz list: %w", err)
 	}
@@ -226,6 +258,7 @@ func ListMods(sevenZipPath, archivePath string) ([]string, error) {
 // Verify runs `7zz t` on archivePath and returns any error.
 func Verify(sevenZipPath, archivePath string) error {
 	cmd := exec.Command(sevenZipPath, "t", archivePath)
+	tools.SetProcAttr(cmd)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("verify failed: %w\n%s", err, string(out))

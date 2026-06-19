@@ -16,7 +16,6 @@ const (
 	NavMenu NavTarget = iota
 	NavScan
 	NavResults
-	NavCompressConfig
 	NavCompress
 	NavSummary
 	NavBackup
@@ -31,11 +30,6 @@ const (
 type NavigateMsg struct {
 	To   NavTarget
 	Data any
-}
-
-// CompressConfigData is passed from Results → CompressConfig.
-type CompressConfigData struct {
-	Groups []AssetGroup // grouped by profile
 }
 
 // AssetGroup holds assets sharing the same compression profile.

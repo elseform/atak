@@ -36,11 +36,9 @@ func (m SummaryModel) Update(msg tea.Msg) (SummaryModel, tea.Cmd) {
 			}
 		case "enter", "m":
 			return m, func() tea.Msg { return NavigateMsg{To: NavMenu} }
-		case "r":
-			// Retry: go back to compress config (caller would need to pass assets).
-			// For now navigate to menu — full retry flow requires richer state.
-			return m, func() tea.Msg { return NavigateMsg{To: NavMenu} }
-		case "q", "ctrl+c":
+		case "r", "q":
+			return m, func() tea.Msg { return NavigateMsg{To: NavResults} }
+		case "ctrl+c":
 			return m, func() tea.Msg { return NavigateMsg{To: NavQuit} }
 		}
 	}
@@ -83,7 +81,7 @@ func (m SummaryModel) View() string {
 	}
 
 	b.WriteString(style.KeyHint("m / enter", "main menu") + "  ")
-	b.WriteString(style.KeyHint("q", "quit"))
+	b.WriteString(style.KeyHint("r / q", "back to results"))
 	return b.String()
 }
 
