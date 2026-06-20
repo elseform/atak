@@ -1,0 +1,83 @@
+version: 2
+
+project_name: stalker-tex
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: linux
+    goos: [linux]
+    goarch: [amd64]
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+    binary: stalker-tex-linux
+
+  - id: windows
+    goos: [windows]
+    goarch: [amd64]
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+    binary: stalker-tex-windows
+
+archives:
+  - id: linux
+    builds: [linux]
+    format: tar.gz
+    name_template: "stalker-tex-{{.Version}}-linux-x64"
+    files:
+      - README.md
+      - SPEC.md
+      - THIRD_PARTY_LICENSES.txt
+
+  - id: windows
+    builds: [windows]
+    format: zip
+    name_template: "stalker-tex-{{.Version}}-windows-x64"
+    files:
+      - README.md
+      - SPEC.md
+      - THIRD_PARTY_LICENSES.txt
+
+checksum:
+  name_template: "checksums.txt"
+
+release:
+  github:
+    owner: noisethanks
+    name: stalker-tex
+  draft: true
+  prerelease: auto
+  name_template: "{{.ProjectName}} {{.Version}}"
+  header: |
+    ## stalker-tex {{.Version}}
+
+    A texture compression and backup utility for STALKER GAMMA modlists.
+
+    ### Download
+    - **Linux:** `stalker-tex-{{.Version}}-linux-x64.tar.gz`
+    - **Windows:** `stalker-tex-{{.Version}}-windows-x64.zip`
+
+    ### Installation
+    **Linux:**
+    ```bash
+    tar -xzf stalker-tex-{{.Version}}-linux-x64.tar.gz
+    chmod +x stalker-tex-linux
+    ./stalker-tex-linux
+    ```
+    **Windows:** Extract the zip and run `stalker-tex-windows.exe`
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - Merge pull request
+      - Merge branch
