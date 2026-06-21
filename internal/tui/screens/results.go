@@ -20,15 +20,17 @@ type ScanResultData struct {
 
 // ResultsModel shows scan results grouped by compression profile.
 type ResultsModel struct {
-	groups       []AssetGroup
-	skipped      int
-	cursor       int
-	mods         []string
+	groups        []AssetGroup // compressible profile groups — cursor navigates these
+	unmatched     []assetRef   // informational only, not selectable
+	excluded      []assetRef   // informational only, not selectable
+	skipped       int
+	cursor        int
+	mods          []string
 	showModPicker bool
-	modPicker    components.ModPicker
-	cfg          *config.Config
-	width        int
-	height       int
+	modPicker     components.ModPicker
+	cfg           *config.Config
+	width         int
+	height        int
 }
 
 func NewResults(data ScanResultData, cfg *config.Config) ResultsModel {
@@ -36,7 +38,7 @@ func NewResults(data ScanResultData, cfg *config.Config) ResultsModel {
 	groupIdx := make(map[string]int) // profile name -> index in ordered
 
 	// Pre-populate all named profiles so zero-hit profiles still render.
-	profiles, _, _ := config.LoadProfiles()
+	profiles, _, _, _ := config.LoadProfiles()
 	for _, p := range profiles {
 		groupIdx[p.Name] = len(ordered)
 		ordered = append(ordered, AssetGroup{
@@ -44,36 +46,35 @@ func NewResults(data ScanResultData, cfg *config.Config) ResultsModel {
 			SuggestedFmt: p.Format,
 		})
 	}
-	// Auto buckets always present regardless of match count.
-	groupIdx["Auto (alpha)"] = len(ordered)
-	ordered = append(ordered, AssetGroup{ProfileName: "Auto (alpha)", SuggestedFmt: "BC7_UNORM"})
-	groupIdx["Auto (no alpha)"] = len(ordered)
-	ordered = append(ordered, AssetGroup{ProfileName: "Auto (no alpha)", SuggestedFmt: "BC1_UNORM"})
+
+	var unmatched, excluded []assetRef
 
 	for _, a := range data.Assets {
-		if a.ProfileMatch == "" {
-			continue
-		}
-		idx, ok := groupIdx[a.ProfileMatch]
-		if !ok {
-			idx = len(ordered)
-			groupIdx[a.ProfileMatch] = idx
-			ordered = append(ordered, AssetGroup{
-				ProfileName:  a.ProfileMatch,
-				SuggestedFmt: a.SuggestedFmt,
-			})
-		}
-		ordered[idx].Assets = append(ordered[idx].Assets, assetRef{
+		ref := assetRef{
 			Path:       a.Path,
 			ModName:    a.ModName,
 			CurrentFmt: a.CurrentFmt,
 			Width:      a.Width,
 			Height:     a.Height,
 			Compressed: a.Compressed,
-		})
+		}
+		switch a.ProfileMatch {
+		case "Excluded":
+			excluded = append(excluded, ref)
+		case "Unmatched", "":
+			unmatched = append(unmatched, ref)
+		default:
+			idx, ok := groupIdx[a.ProfileMatch]
+			if !ok {
+				// Unknown profile name — treat as unmatched.
+				unmatched = append(unmatched, ref)
+				continue
+			}
+			ordered[idx].Assets = append(ordered[idx].Assets, ref)
+		}
 	}
 
-	// Compute sorted unique mod names for the mod picker.
+	// Compute sorted unique mod names from compressible groups only.
 	seen := make(map[string]bool)
 	var mods []string
 	for _, g := range ordered {
@@ -87,10 +88,12 @@ func NewResults(data ScanResultData, cfg *config.Config) ResultsModel {
 	sort.Strings(mods)
 
 	return ResultsModel{
-		groups:  ordered,
-		skipped: data.Skipped,
-		mods:    mods,
-		cfg:     cfg,
+		groups:    ordered,
+		unmatched: unmatched,
+		excluded:  excluded,
+		skipped:   data.Skipped,
+		mods:      mods,
+		cfg:       cfg,
 	}
 }
 
@@ -148,14 +151,14 @@ func (m ResultsModel) buildJobs(scope int, selectedProfile, selectedMod string) 
 	groups := m.groups
 	cfg := m.cfg
 	return func() tea.Msg {
-		profiles, _, _ := config.LoadProfiles()
+		profiles, _, _, _ := config.LoadProfiles()
 		mipsFor := func(name string) bool {
 			for _, p := range profiles {
 				if p.Name == name {
 					return p.GenerateMips
 				}
 			}
-			return true // auto groups default to mips
+			return true // default to mips on
 		}
 
 		var filtered []AssetGroup
@@ -222,16 +225,20 @@ func (m ResultsModel) View() string {
 	var b strings.Builder
 	b.WriteString(style.StyleTitle.Render("Scan Results") + "\n\n")
 
+	// Counter line.
 	total := 0
 	for _, g := range m.groups {
 		total += len(g.Assets)
 	}
 	b.WriteString(fmt.Sprintf(
-		"%s  %s\n\n",
+		"%s  %s  %s  %s\n\n",
 		style.StyleBody.Render(fmt.Sprintf("%d to compress", total)),
 		style.StyleMuted.Render(fmt.Sprintf("%d skipped (compressed)", m.skipped)),
+		style.StyleMuted.Render(fmt.Sprintf("%d unmatched", len(m.unmatched))),
+		style.StyleMuted.Render(fmt.Sprintf("%d excluded", len(m.excluded))),
 	))
 
+	// Compressible profile groups (cursor navigates these).
 	if len(m.groups) == 0 {
 		b.WriteString(style.StyleSuccess.Render("Nothing to compress — all textures are already in a BCn format.") + "\n")
 	} else {
@@ -249,6 +256,16 @@ func (m ResultsModel) View() string {
 			b.WriteString(line + "\n")
 		}
 	}
+
+	// Unmatched — informational, not selectable.
+	b.WriteString("\n")
+	b.WriteString(style.StyleMuted.Render(fmt.Sprintf("  Unmatched (%d files)", len(m.unmatched))) + "\n")
+	if len(m.unmatched) > 0 {
+		b.WriteString(style.StyleMuted.Render("  Add patterns to profiles.json to compress these") + "\n")
+	}
+
+	// Excluded — informational, not selectable.
+	b.WriteString(style.StyleMuted.Render(fmt.Sprintf("  Excluded (%d files)", len(m.excluded))) + "\n")
 
 	b.WriteString("\n")
 	b.WriteString(style.KeyHint("enter", "run profile") + "  ")

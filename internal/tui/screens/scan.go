@@ -60,11 +60,11 @@ func (m ScanModel) startScan() tea.Cmd {
 	modsDir := m.cfg.ModsDir
 	ctx := m.ctx
 	return func() tea.Msg {
-		profiles, _, err := config.LoadProfiles()
+		profiles, excludePatterns, _, err := config.LoadProfiles()
 		if err != nil || len(profiles) == 0 {
 			return scanCompleteMsg{total: 0}
 		}
-		ch, skippedCh, _ := scan.Walk(modsDir, profiles, m.cfg.ScanExclusions)
+		ch, skippedCh, _ := scan.Walk(modsDir, profiles, excludePatterns, m.cfg.ScanExclusions)
 		return readNextAsset(ctx, ch, skippedCh)
 	}
 }

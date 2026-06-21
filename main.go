@@ -30,7 +30,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	_, profilesCreated, err := config.LoadProfiles()
+	_, _, profilesCreated, err := config.LoadProfiles()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "stalker-tex: failed to load profiles: %v\n", err)
 		os.Exit(1)

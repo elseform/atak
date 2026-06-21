@@ -1,11 +1,10 @@
 {
+  "excludePatterns": [
+    "fx_sun*", "fx_*",
+    "*_lm.*", "*_cm.*", "*_nm2.*",
+    "*detail_map*", "*_hm.*"
+  ],
   "profiles": [
-    {
-      "name": "UI / Icons",
-      "format": "BC3_UNORM",
-      "generateMips": false,
-      "patterns": ["*/textures/ui/*", "*_icons.*"]
-    },
     {
       "name": "Normal Maps",
       "format": "BC5_UNORM",
@@ -13,8 +12,14 @@
       "patterns": ["*_bump.*", "*_bump#.*", "*_normal.*", "*_nm.*", "*_nmap.*"]
     },
     {
+      "name": "UI / Icons",
+      "format": "BC3_UNORM",
+      "generateMips": false,
+      "patterns": ["*/textures/ui/*", "*_icons.*"]
+    },
+    {
       "name": "Diffuse / Color",
-      "format": "BC7_UNORM",
+      "format": "BC3_UNORM",
       "generateMips": true,
       "patterns": [
         "*_d.*", "*_diff.*", "*_diffuse.*",

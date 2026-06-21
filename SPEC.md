@@ -108,34 +108,71 @@ with broadly correct STALKER conventions but users are expected to tune it:
 
 ```json
 {
+  "excludePatterns": [
+    "fx_sun*", "fx_*",
+    "*_lm.*", "*_cm.*", "*_nm2.*",
+    "*detail_map*", "*_hm.*"
+  ],
   "profiles": [
     {
       "name": "Normal Maps",
       "format": "BC5_UNORM",
       "generateMips": true,
-      "patterns": ["*_bump.*", "*_normal.*", "*_nm.*", "*_nmap.*"]
+      "patterns": [
+        "*_bump.*", "*_bump#.*",
+        "*_normal.*", "*_nrm.*",
+        "*_nm.*", "*_nm_*",
+        "*_nmap.*", "*_norm.*", "*_norm_*",
+        "*nbump*", "*_normalbump*"
+      ]
     },
     {
       "name": "UI / Icons",
       "format": "BC3_UNORM",
       "generateMips": false,
-      "patterns": ["ui/*", "*_icon.*", "*_hud.*", "*_ui.*"]
+      "patterns": ["*/textures/ui/*", "*_icons.*"]
     },
     {
-      "name": "Diffuse / Color",
+      "name": "Diffuse / Color (RGBA)",
       "format": "BC7_UNORM",
       "generateMips": true,
-      "patterns": ["*_d.*", "*_diff.*", "*_albedo.*", "*_base.*", "*_col.*"]
+      "patterns": [
+        "*_d.*", "*_diff.*", "*_diffuse.*",
+        "*_albedo.*", "*_base.*",
+        "*_col.*", "*_color.*", "*_co.*",
+        "*_c.*", "*_b.*", "*_rgb.*",
+        "*_details.*"
+      ]
+    },
+    {
+      "name": "Diffuse / Color (RGB)",
+      "format": "BC1_UNORM",
+      "generateMips": true,
+      "patterns": []
     },
     {
       "name": "Specular / Gloss",
       "format": "BC3_UNORM",
       "generateMips": true,
       "patterns": ["*_spec.*", "*_gloss.*"]
+    },
+    {
+      "name": "Masks / Alpha",
+      "format": "BC3_UNORM",
+      "generateMips": true,
+      "patterns": ["*_mask.*", "*_alpha.*"]
     }
   ]
 }
 ```
+
+Notes:
+- Diffuse/Color uses BC7_UNORM with automatic BC3_UNORM fallback (see Compression Execution)
+- BC1_UNORM for opaque RGB diffuse — matched by header (HasAlpha == false) not patterns,
+  since RGB-only files have no reliable naming convention
+- Normal map patterns expanded to match bash script proven conventions
+- BC7 is confirmed supported by XRay engine — the previous crash was caused by
+  Auto buckets compressing engine-specific textures, not BC7 itself
 
 **Unmatched files** — DDS files that don't match any profile pattern are surfaced in
 scan results as a separate "Unmatched" bucket. The user can assign them a format
@@ -394,53 +431,74 @@ Both modes:
 - Group results by profile for display
 - Supports Ctrl+C cancellation — cancels the walk goroutine via context, returns to main menu with message "Scan cancelled"
 
-#### Classification — Two-Pass System
+#### Classification Philosophy
 
-Classification uses two passes. Header data is primary; filename patterns are override.
+**If it's not explicitly in a profile, don't compress it.**
 
-**Pass 1 — Header-based default (always runs first):**
-```
-HasAlpha == true  → SuggestedFmt: BC7_UNORM,  ProfileMatch: "Auto (alpha)"
-HasAlpha == false → SuggestedFmt: BC1_UNORM,  ProfileMatch: "Auto (no alpha)"
-```
-Every uncompressed file gets a safe default format from its actual pixel data.
-BC7 for alpha textures (high quality, preserves transparency), BC1 for opaque
-(smallest footprint).
+The tool never blindly compresses unrecognized textures. Texture formats in GAMMA
+mods are highly inconsistent across mod authors — engine-specific textures, unusual
+formats, and edge cases are common. Auto-compressing unknown textures risks game
+crashes and visual corruption.
 
-**Pass 2 — Filename pattern override (runs after, overwrites if matched):**
-```
-*_bump.*, *_normal.* → BC5_UNORM  "Normal Maps"    (overrides header — normal maps
-                                                     may have alpha for gloss data
-                                                     but still need BC5)
-*/textures/ui/*      → BC3_UNORM  "UI / Icons"     (engine expects BC3 for UI)
-*_diff.*, *_base.*   → BC7_UNORM  "Diffuse / Color" (confirms/upgrades header)
-```
-Filename match always wins over header default. Profiles are fully user-defined
-in `profiles.json` — the binary applies whatever profiles are loaded.
+**Classification is pattern-match only:**
+- Files matched by a profile pattern → queued for compression with that profile's format
+- Files matched by global `excludePatterns` → always skipped, counted as "Excluded"
+- Files not matched by any profile → shown as "Unmatched" (informational only, never compressed)
+
+**No Auto buckets.** The previous Auto (alpha) / Auto (no alpha) header-based
+fallback has been removed — it caused engine crashes by compressing engine-specific
+textures to unsupported formats.
 
 **Result buckets in scan results:**
-- One bucket per named profile (from profiles.json) — shown regardless of count,
-  even zero-hit profiles must render (allows users to verify pattern coverage)
-- `Auto (alpha)` — header-classified files with alpha channel, suggested BC7
-- `Auto (no alpha)` — header-classified files without alpha, suggested BC1
-- `Unknown format` — files with unrecognized FourCC or DXGI format codes that
-  cannot be safely classified — skipped from compression by default
+- One bucket per named profile (from profiles.json) — compressible, selectable
+- `Unmatched` — files with no profile match, shown with count but greyed out and
+  not selectable for compression. Label: "Add patterns to profiles.json to compress these."
+- `Excluded` — files matching global excludePatterns, shown for transparency
+- All buckets shown regardless of count (zero-hit profiles still render)
+
+#### Profile-Level Exclusions
+
+Profiles support an optional `exclude` array — filename patterns that match the
+profile's `patterns` but should be skipped:
+
+```json
+{
+  "name": "Normal Maps",
+  "format": "BC5_UNORM",
+  "generateMips": true,
+  "patterns": ["*_bump.*", "*_normal.*"],
+  "exclude": ["*_bump_detail.*", "*_lm.*"]
+}
+```
+
+#### Global Exclusion Patterns
+
+`profiles.json` supports a top-level `excludePatterns` array — filename patterns
+that are never compressed regardless of profile match:
+
+```json
+{
+  "excludePatterns": ["fx_sun*", "*_lm.*", "*_cm.*", "*_nm2.*"],
+  "profiles": [...]
+}
+```
+
+Matched against the filename (basename) before any profile matching. If a file
+matches `excludePatterns`, it is skipped and counted as "Excluded".
+
+The embedded default `profiles.json` ships with conservative `excludePatterns`
+covering known engine-specific texture naming conventions in GAMMA.
 
 **Counters on scan results screen:**
-- `___ to compress` — total uncompressed files with a known suggested format
-- `___ skipped (compressed)` — files found but skipped because `DDSInfo.Compressed == true`
-  This should be ~24,000 for a full GAMMA install. The count must be tracked in
-  `scan.Walk` and passed through to the results screen — not calculated from
-  the asset list after the fact (already-compressed files are never emitted
-  to the assets channel, so they must be counted inside the walker).
-- Remove "already done" counter — implies state tracking that doesn't exist
-- Remove "unmatched" counter — always 0, misleading
+- `___ to compress` — total files matched by profiles (excluding excluded files)
+- `___ skipped (compressed)` — files already compressed, skipped by scanner
+- `___ unmatched` — uncompressed files with no profile match (informational)
+- `___ excluded` — files matching global excludePatterns
 
 **Unknown format handling:**
-Files where the FourCC or DXGI format code is not recognized are marked
-`Asset.Unknown = true`. They appear in the "Unknown format" bucket and are
-excluded from all compression jobs. Do not attempt to compress unknown formats —
-texconv behavior on unrecognized input is undefined and may produce corrupt output.
+Files where the FourCC or DXGI format code is not recognized are treated as
+unmatched — shown in the Unmatched bucket, never compressed.
+
 
 #### Scanner Exclusions
 
@@ -502,12 +560,20 @@ remains — it is still needed to show the OperationScreen during compression.
 - Worker pool: `max(1, runtime.NumCPU()/2)` concurrent texconv processes
 - Per-file texconv invocation:
   ```
-  texconv -f <FORMAT> -m 0 -y -o <output_dir> -- <input_file>
+  texconv -f <FORMAT> -m 0 -if CUBIC -bc x -gpu 0 -y -nologo -o <output_dir> -- <input_file>
   ```
   Note: `--` separator is required before input path — paths starting with `/`
   are interpreted as flags without it.
   `-m 0` generates full mip chain if `generateMips == true` in profile,
   or `-m 1` for no mips if `generateMips == false`
+  `-if CUBIC` cubic interpolation for mip generation (better quality)
+  `-bc x` quick BCn encoding (major BC7 speedup)
+  `-gpu 0` GPU accelerated compression (falls back to CPU on Linux)
+  `-nologo` suppress Microsoft header output
+
+- **BC7 → BC3 automatic fallback:** If texconv exits non-zero with BC7_UNORM,
+  automatically retry with BC3_UNORM. Matches proven bash script behavior.
+  CompressionResult records the actual format used after fallback.
 - Capture stdout/stderr per file into `CompressionResult`
 - Emit `compressionDoneMsg` per file — adapted to feed shared `OperationScreen`
   component with:

@@ -14,6 +14,7 @@ type Asset struct {
 	ModName      string
 	CurrentFmt   string
 	Compressed   bool
+	Excluded     bool
 	Width        int
 	Height       int
 	HasAlpha     bool
@@ -22,9 +23,11 @@ type Asset struct {
 }
 
 // Walk traverses modsDir, emitting Asset values for every uncompressed .dds file found.
+// excludePatterns are basename globs from profiles.json — matched files are emitted with
+// Excluded:true and ProfileMatch:"Excluded". exclusions are directory-name globs from
+// config.json — matched directories are skipped entirely.
 // Returns three channels: assets, skipped count (one value sent on completion), and errors.
-// The skipped count is sent before the assets channel is closed, so reading it is race-free.
-func Walk(modsDir string, profiles []config.Profile, exclusions []string) (<-chan Asset, <-chan int, <-chan error) {
+func Walk(modsDir string, profiles []config.Profile, excludePatterns []string, exclusions []string) (<-chan Asset, <-chan int, <-chan error) {
 	assets := make(chan Asset, 256)
 	skippedCh := make(chan int, 1)
 	errs := make(chan error, 1)
@@ -60,18 +63,30 @@ func Walk(modsDir string, profiles []config.Profile, exclusions []string) (<-cha
 
 			rel, _ := filepath.Rel(modsDir, path)
 			modName := modNameFromRel(rel)
+			base := strings.ToLower(filepath.Base(path))
 
-			// Pass 1: header-based default.
-			profileMatch := "Auto (no alpha)"
-			suggestedFmt := "BC1_UNORM"
-			if info.HasAlpha {
-				profileMatch = "Auto (alpha)"
-				suggestedFmt = "BC7_UNORM"
+			// Global exclude check — runs before profile matching.
+			if matchPatterns(base, excludePatterns) {
+				assets <- Asset{
+					Path:         path,
+					ModName:      modName,
+					CurrentFmt:   info.Format,
+					Width:        info.Width,
+					Height:       info.Height,
+					HasAlpha:     info.HasAlpha,
+					ProfileMatch: "Excluded",
+					Excluded:     true,
+				}
+				return nil
 			}
-			// Pass 2: filename pattern override wins if matched.
-			if p, f := matchProfile(path, profiles); p != "" {
-				profileMatch = p
-				suggestedFmt = f
+
+			// Profile matching with per-profile exclusion.
+			profileName, suggestedFmt, profileExcluded := matchProfile(path, profiles)
+			if profileExcluded {
+				return nil // silently skip — matched profile but caught by profile's exclude list
+			}
+			if profileName == "" {
+				profileName = "Unmatched"
 			}
 
 			assets <- Asset{
@@ -82,7 +97,7 @@ func Walk(modsDir string, profiles []config.Profile, exclusions []string) (<-cha
 				Width:        info.Width,
 				Height:       info.Height,
 				HasAlpha:     info.HasAlpha,
-				ProfileMatch: profileMatch,
+				ProfileMatch: profileName,
 				SuggestedFmt: suggestedFmt,
 			}
 			return nil
@@ -108,26 +123,45 @@ func modNameFromRel(rel string) string {
 }
 
 // matchProfile returns the profile name and suggested format for the given file path.
-func matchProfile(path string, profiles []config.Profile) (string, string) {
+// profileExcluded is true when the file matched a profile's patterns but was caught by
+// that profile's exclude list — caller should skip the file entirely (no emit).
+func matchProfile(path string, profiles []config.Profile) (name, format string, profileExcluded bool) {
 	base := strings.ToLower(filepath.Base(path))
 	for _, p := range profiles {
+		matched := false
 		for _, pattern := range p.Patterns {
-			// filepath.Match handles glob patterns.
-			matched, err := filepath.Match(strings.ToLower(pattern), base)
-			if err == nil && matched {
-				return p.Name, p.Format
+			if m, _ := filepath.Match(strings.ToLower(pattern), base); m {
+				matched = true
+				break
 			}
-			// Also try matching against the last two path components for "ui/*" style patterns.
+			// Also try matching against last two path components for "ui/*" style patterns.
 			if strings.Contains(pattern, "/") || strings.Contains(pattern, string(filepath.Separator)) {
 				rel := filepath.ToSlash(path)
 				if idx := strings.LastIndex(rel, "/"); idx >= 0 {
 					tail := strings.ToLower(rel[max(0, idx-20):])
-					if matched, err := filepath.Match(strings.ToLower(filepath.ToSlash(pattern)), tail); err == nil && matched {
-						return p.Name, p.Format
+					if m, _ := filepath.Match(strings.ToLower(filepath.ToSlash(pattern)), tail); m {
+						matched = true
+						break
 					}
 				}
 			}
 		}
+		if matched {
+			if matchPatterns(base, p.Exclude) {
+				return "", "", true
+			}
+			return p.Name, p.Format, false
+		}
 	}
-	return "", ""
+	return "", "", false
+}
+
+// matchPatterns reports whether base matches any of the given glob patterns.
+func matchPatterns(base string, patterns []string) bool {
+	for _, pattern := range patterns {
+		if m, _ := filepath.Match(strings.ToLower(pattern), base); m {
+			return true
+		}
+	}
+	return false
 }
