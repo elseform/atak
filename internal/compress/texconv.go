@@ -29,15 +29,16 @@ func Run(ctx context.Context, texconvPath string, asset scan.Asset, format strin
 
 	args := []string{
 		"-f", format,
-		"-y",           // overwrite
+		"-m", "0",       // full mip chain
+		"-if", "CUBIC",  // cubic interpolation for mip generation
+		"-bc", "x",      // quick BCn encoding (major BC7 speedup)
+		"-gpu", "0",     // GPU accelerated compression, falls back to CPU if unavailable
+		"-y",            // overwrite
+		"-nologo",       // suppress header
 		"-o", outputDir,
+		"--",
+		asset.Path,
 	}
-	if generateMips {
-		args = append(args, "-m", "0") // generate full mip chain
-	} else {
-		args = append(args, "-m", "1") // no mip generation
-	}
-	args = append(args, "--", asset.Path)
 
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
 		return CompressionResult{Asset: asset, Success: false, Err: err}

@@ -23,7 +23,11 @@ var fourCCFormats = map[uint32]string{
 	0x33545844: "BC2_UNORM",  // DXT3
 	0x35545844: "BC3_UNORM",  // DXT5
 	0x31495441: "BC4_UNORM",  // ATI1 / BC4
+	0x55344342: "BC4_UNORM",  // BC4U — texconv BC4
+	0x53344342: "BC4_SNORM",  // BC4S — texconv BC4 signed
 	0x32495441: "BC5_UNORM",  // ATI2 / BC5
+	0x55354342: "BC5_UNORM",  // BC5U — texconv BC5
+	0x53354342: "BC5_SNORM",  // BC5S — texconv BC5 signed
 	0x30315844: "",           // DX10 — resolved via extended header
 }
 
