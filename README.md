@@ -2,9 +2,9 @@
 
 > Texture compression and backup utility for STALKER GAMMA modlists.
 
-STALKER GAMMA represents a labor of love by hundreds of modders, culminating in a unique and memorable gaming experience. However, the ecosystem ships many texture assets uncompressed. On hardware with limited VRAM, this causes stuttering, hitching, and outright crashes during gameplay. ATAK compresses those textures to BCn block compression formats, dramatically reducing VRAM pressure with minimal visual difference.
+![screenshot placeholder — gameplay screenshot showing performance overlay]
 
-**[PLACEHOLDER: X GB → Y GB VRAM · Z% reduction · compressed in N minutes]**
+STALKER GAMMA represents a labor of love by hundreds of modders, culminating in a unique and memorable gaming experience. However, the ecosystem ships many texture assets uncompressed. On hardware with limited VRAM, this causes stuttering, hitching, and outright crashes during gameplay. ATAK compresses those textures to BCn block compression formats, dramatically reducing VRAM pressure with minimal visual difference.
 
 ---
 
@@ -84,21 +84,9 @@ Config lives at:
 
 ## Performance
 
-**[PLACEHOLDER: benchmark table]**
-
-```
-System: [CPU] / [GPU] / [RAM]
-GAMMA version: 0.9.5 — 616 mods
-
-                    Before          After
-VRAM usage:         X.X GB          X.X GB
-Disk space:         XXX GB          XXX GB
-Compression time:   —               XX minutes
-```
-
 **Note on BC7 compression:** BC7 GPU acceleration is not available on Linux — compression is CPU-only and takes approximately 40-60 minutes for large jobs. Windows users benefit from DirectX GPU acceleration. For faster Linux compression, change BC7 profiles to BC3 in `profiles.json` — minimal quality difference for most textures.
 
-Benchmarks welcome — open a GitHub issue or post in the GAMMA Discord.
+Benchmarks and feedback welcome — open a GitHub issue or post in the GAMMA Discord.
 
 ---
 
@@ -131,9 +119,9 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
 
 ## GAMMA
 
-[S.T.A.L.K.E.R. GAMMA](https://www.moddb.com/mods/stalker-gamma) is a large modpack
+[S.T.A.L.K.E.R. GAMMA](https://www.stalkergamma.com/) is a large modpack
 for S.T.A.L.K.E.R. Anomaly maintained by Grok. Join the community on
-[Discord](https://discord.gg/stalker-gamma).
+[Discord](https://discord.com/invite/stalker-gamma).
 
 ---
 
@@ -153,6 +141,6 @@ Full license text available in-app via the About screen.
 
 If ATAK saved your playthrough, consider supporting development:
 
-**[PLACEHOLDER: linktree link]**
+**[noisethanks.com/support](https://noisethanks.com/support)**
 
 Made by [mrchocolate](https://github.com/noisethanks)
