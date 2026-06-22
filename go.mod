@@ -1,4 +1,4 @@
-module github.com/noisethanks/stalker-tex
+module github.com/noisethanks/atak
 
 go 1.26.4
 

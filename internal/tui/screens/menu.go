@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/noisethanks/stalker-tex/internal/tui/style"
+	"github.com/noisethanks/atak/internal/tui/style"
 )
 
 type menuItem struct {
@@ -61,7 +61,7 @@ func (m MenuModel) Update(msg tea.Msg) (MenuModel, tea.Cmd) {
 
 func (m MenuModel) View() string {
 	var b strings.Builder
-	b.WriteString(style.StyleTitle.Render("stalker-tex") + "\n")
+	b.WriteString(style.StyleTitle.Render("atak") + "\n")
 	b.WriteString(style.StyleSubtitle.Render("GAMMA texture compressor & backup tool") + "\n\n")
 
 	if m.statusMsg != "" {

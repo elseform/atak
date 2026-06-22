@@ -7,8 +7,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/noisethanks/stalker-tex/internal/config"
-	"github.com/noisethanks/stalker-tex/internal/tui/style"
+	"github.com/noisethanks/atak/internal/config"
+	"github.com/noisethanks/atak/internal/tui/style"
 )
 
 type settingsField int

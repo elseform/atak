@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/noisethanks/stalker-tex/internal/tui/style"
+	"github.com/noisethanks/atak/internal/tui/style"
 )
 
 // FirstRunModel is shown exactly once when profiles.json is created for the first time.

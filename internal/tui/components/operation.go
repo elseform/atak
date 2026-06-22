@@ -8,7 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/noisethanks/stalker-tex/internal/tui/style"
+	"github.com/noisethanks/atak/internal/tui/style"
 )
 
 // OperationProgressMsg is sent via the progress channel to update operation state.

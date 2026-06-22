@@ -1,6 +1,6 @@
 version: 2
 
-project_name: stalker-tex
+project_name: atak
 
 before:
   hooks:
@@ -14,7 +14,7 @@ builds:
       - CGO_ENABLED=0
     ldflags:
       - -s -w -X main.version={{.Version}}
-    binary: stalker-tex-linux
+    binary: atak-linux
 
   - id: windows
     goos: [windows]
@@ -23,13 +23,13 @@ builds:
       - CGO_ENABLED=0
     ldflags:
       - -s -w -X main.version={{.Version}}
-    binary: stalker-tex-windows
+    binary: atak-windows
 
 archives:
   - id: linux
     builds: [linux]
     format: tar.gz
-    name_template: "stalker-tex-{{.Version}}-linux-x64"
+    name_template: "atak-{{.Version}}-linux-x64"
     files:
       - README.md
       - SPEC.md
@@ -38,7 +38,7 @@ archives:
   - id: windows
     builds: [windows]
     format: zip
-    name_template: "stalker-tex-{{.Version}}-windows-x64"
+    name_template: "atak-{{.Version}}-windows-x64"
     files:
       - README.md
       - SPEC.md
@@ -50,27 +50,27 @@ checksum:
 release:
   github:
     owner: noisethanks
-    name: stalker-tex
+    name: atak
   draft: true
   prerelease: auto
   name_template: "{{.ProjectName}} {{.Version}}"
   header: |
-    ## stalker-tex {{.Version}}
+    ## atak {{.Version}}
 
     A texture compression and backup utility for STALKER GAMMA modlists.
 
     ### Download
-    - **Linux:** `stalker-tex-{{.Version}}-linux-x64.tar.gz`
-    - **Windows:** `stalker-tex-{{.Version}}-windows-x64.zip`
+    - **Linux:** `atak-{{.Version}}-linux-x64.tar.gz`
+    - **Windows:** `atak-{{.Version}}-windows-x64.zip`
 
     ### Installation
     **Linux:**
     ```bash
-    tar -xzf stalker-tex-{{.Version}}-linux-x64.tar.gz
-    chmod +x stalker-tex-linux
-    ./stalker-tex-linux
+    tar -xzf atak-{{.Version}}-linux-x64.tar.gz
+    chmod +x atak-linux
+    ./atak-linux
     ```
-    **Windows:** Extract the zip and run `stalker-tex-windows.exe`
+    **Windows:** Extract the zip and run `atak-windows.exe`
 
 changelog:
   sort: asc

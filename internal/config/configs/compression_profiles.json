@@ -9,7 +9,10 @@
       "name": "Normal Maps",
       "format": "BC5_UNORM",
       "generateMips": true,
-      "patterns": ["*_bump.*", "*_bump#.*", "*_normal.*", "*_nm.*", "*_nmap.*"]
+      "patterns": [
+        "*_bump.*", "*_bump#.*", "*_normal.*", "*_nm.*", "*_nmap.*",
+        "*_nrm.*", "*_norm.*", "*_norm_*", "*nbump*", "*_normalbump.*", "*_nm_*"
+      ]
     },
     {
       "name": "UI / Icons",
@@ -19,7 +22,7 @@
     },
     {
       "name": "Diffuse / Color",
-      "format": "BC3_UNORM",
+      "format": "BC7_UNORM",
       "generateMips": true,
       "patterns": [
         "*_d.*", "*_diff.*", "*_diffuse.*",

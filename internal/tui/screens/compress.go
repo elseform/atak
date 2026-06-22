@@ -7,12 +7,12 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/noisethanks/stalker-tex/internal/compress"
-	"github.com/noisethanks/stalker-tex/internal/config"
-	"github.com/noisethanks/stalker-tex/internal/scan"
-	"github.com/noisethanks/stalker-tex/internal/tools"
-	"github.com/noisethanks/stalker-tex/internal/tui/components"
-	"github.com/noisethanks/stalker-tex/internal/tui/style"
+	"github.com/noisethanks/atak/internal/compress"
+	"github.com/noisethanks/atak/internal/config"
+	"github.com/noisethanks/atak/internal/scan"
+	"github.com/noisethanks/atak/internal/tools"
+	"github.com/noisethanks/atak/internal/tui/components"
+	"github.com/noisethanks/atak/internal/tui/style"
 )
 
 // compressReadyMsg is returned once RunPool and channel bridges are set up.

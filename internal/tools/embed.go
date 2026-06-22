@@ -39,7 +39,7 @@ func writeBin(dir, name string, data []byte) (string, error) {
 
 // Extract writes both embedded binaries to a temp dir and returns the tool paths.
 func Extract() (*EmbeddedTools, error) {
-	dir, err := os.MkdirTemp("", "stalker-tex-*")
+	dir, err := os.MkdirTemp("", "atak-*")
 	if err != nil {
 		return nil, fmt.Errorf("mkdirtemp: %w", err)
 	}

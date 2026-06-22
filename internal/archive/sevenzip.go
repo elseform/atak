@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/noisethanks/stalker-tex/internal/tools"
+	"github.com/noisethanks/atak/internal/tools"
 )
 
 // BackupInfo describes a discovered backup archive.

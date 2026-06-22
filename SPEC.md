@@ -1,4 +1,4 @@
-# stalker-tex — Project Specification
+# atak — Project Specification
 
 ## What This Is
 
@@ -63,8 +63,8 @@ Windows machine without the user installing anything.
 Config directory is platform-aware via `os.UserConfigDir()` — no hardcoded paths:
 
 ```
-Linux:   ~/.config/stalker-tex/
-Windows: %AppData%\stalker-tex\
+Linux:   ~/.config/atak/
+Windows: %AppData%\atak\
 ```
 
 Each contains:
@@ -80,7 +80,7 @@ This includes format selection, pattern matching, and mip generation. The binary
 knows how to read and apply profiles, not what they should contain.
 
 **First-run behavior:** if `profiles.json` does not exist in the config dir, the tool
-copies the embedded default to `~/.config/stalker-tex/profiles.json` and shows a
+copies the embedded default to `~/.config/atak/profiles.json` and shows a
 one-time notice screen before proceeding to the main menu:
 
 ```
@@ -88,7 +88,7 @@ one-time notice screen before proceeding to the main menu:
 │  Compression profiles created                       │
 │                                                     │
 │  A default profiles.json has been created at:       │
-│  ~/.config/stalker-tex/profiles.json                │
+│  ~/.config/atak/profiles.json                │
 │                                                     │
 │  Edit this file to customize which textures get     │
 │  compressed and with which format. Changes take     │
@@ -187,7 +187,7 @@ packs. The Settings screen shows the path to `profiles.json` and offers an
 ## Project Structure
 
 ```
-stalker-tex/
+atak/
 ├── main.go
 ├── go.mod
 ├── go.sum
@@ -630,7 +630,7 @@ func setProcAttr(cmd *exec.Cmd)   // set process attributes before Start()
 - `killProcess` uses `syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)` to kill
   the entire process group
 - Crash mitigation via lockfile:
-  - On operation start: write `~/.config/stalker-tex/stalker-tex.lock` with PID
+  - On operation start: write `~/.config/atak/atak.lock` with PID
   - On clean end: delete lockfile
   - On startup: check for stale lockfile, kill stale PID, log warning
   - Lockfile lives in `internal/tools/lockfile.go` (Linux build tag only)
@@ -679,7 +679,7 @@ func setProcAttr(cmd *exec.Cmd)   // set process attributes before Start()
   - The backup system is the safety net; restore from backup if needed
   - Removes user confusion and config complexity
 - Scan exclusions — editable list of glob patterns, default: `[".*", "downloads", "Downloads"]`
-- Persist to `os.UserConfigDir()/stalker-tex/config.json`
+- Persist to `os.UserConfigDir()/atak/config.json`
 
 Full config.json schema:
 ```json
@@ -772,12 +772,12 @@ Accessible from the main menu. Displays:
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│  stalker-tex v<version>                             │
+│  atak v<version>                             │
 │                                                     │
 │  A texture compression and backup utility for       │
 │  STALKER GAMMA modlists.                            │
 │                                                     │
-│  github.com/noisethanks/stalker-tex                 │
+│  github.com/noisethanks/atak                 │
 │                                                     │
 │  ── Third-Party Licenses ──────────────────────     │
 │                                                     │
@@ -832,7 +832,7 @@ To keep maintenance footprint small, the following are explicitly out of scope:
   to `internal/tools/process_windows.go` only, ~50-60 lines using
   `golang.org/x/sys/windows`. No refactor needed.
 - **stalker-update** — separate binary, same visual identity, handles GAMMA
-  mod updates selectively. Dependent on community reception of stalker-tex.
+  mod updates selectively. Dependent on community reception of atak.
 
 ---
 
@@ -855,10 +855,10 @@ No other external dependencies. Standard library only for everything else.
 go run ./main.go
 
 # Release — Linux x86-64, static
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build   -ldflags="-s -w -X main.version=v0.1.0"   -o stalker-tex-linux ./main.go
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build   -ldflags="-s -w -X main.version=v0.1.0"   -o atak-linux ./main.go
 
 # Release — Windows x86-64
-CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build   -ldflags="-s -w -X main.version=v0.1.0"   -o stalker-tex-windows.exe ./main.go
+CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build   -ldflags="-s -w -X main.version=v0.1.0"   -o atak-windows.exe ./main.go
 
 # goreleaser handles both targets in CI — version injected from git tag
 ```

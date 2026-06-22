@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/noisethanks/stalker-tex/internal/tui/style"
+	"github.com/noisethanks/atak/internal/tui/style"
 )
 
 const licenseConst = `Third-Party Licenses
@@ -419,10 +419,10 @@ func (m AboutModel) visibleLines() int {
 
 func (m AboutModel) View() string {
 	var b strings.Builder
-	b.WriteString(style.StyleTitle.Render("stalker-tex "+m.version) + "\n\n")
+	b.WriteString(style.StyleTitle.Render("atak "+m.version) + "\n\n")
 	b.WriteString(style.StyleBody.Render("A texture compression and backup utility for") + "\n")
 	b.WriteString(style.StyleBody.Render("STALKER GAMMA modlists.") + "\n\n")
-	b.WriteString(style.StyleMuted.Render("github.com/noisethanks/stalker-tex") + "\n\n\n")
+	b.WriteString(style.StyleMuted.Render("github.com/noisethanks/atak") + "\n\n\n")
 
 	visible := m.visibleLines()
 	end := m.offset + visible

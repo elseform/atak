@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/noisethanks/stalker-tex/internal/scan"
+	"github.com/noisethanks/atak/internal/scan"
 )
 
 // Job represents a single compression task.

@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/noisethanks/stalker-tex/internal/config"
+	"github.com/noisethanks/atak/internal/config"
 )
 
 // Asset is a single texture file discovered during a scan.
@@ -81,7 +81,7 @@ func Walk(modsDir string, profiles []config.Profile, excludePatterns []string, e
 			}
 
 			// Profile matching with per-profile exclusion.
-			profileName, suggestedFmt, profileExcluded := matchProfile(path, profiles)
+			profileName, suggestedFmt, profileExcluded := matchProfile(path, rel, profiles)
 			if profileExcluded {
 				return nil // silently skip — matched profile but caught by profile's exclude list
 			}
@@ -122,11 +122,13 @@ func modNameFromRel(rel string) string {
 	return rel
 }
 
-// matchProfile returns the profile name and suggested format for the given file path.
+// matchProfile returns the profile name and suggested format for the given file.
+// rel is the path relative to modsDir, used for path-based patterns like */textures/ui/*.
 // profileExcluded is true when the file matched a profile's patterns but was caught by
 // that profile's exclude list — caller should skip the file entirely (no emit).
-func matchProfile(path string, profiles []config.Profile) (name, format string, profileExcluded bool) {
+func matchProfile(path, rel string, profiles []config.Profile) (name, format string, profileExcluded bool) {
 	base := strings.ToLower(filepath.Base(path))
+	relSlash := strings.ToLower(filepath.ToSlash(rel))
 	for _, p := range profiles {
 		matched := false
 		for _, pattern := range p.Patterns {
@@ -134,15 +136,10 @@ func matchProfile(path string, profiles []config.Profile) (name, format string, 
 				matched = true
 				break
 			}
-			// Also try matching against last two path components for "ui/*" style patterns.
 			if strings.Contains(pattern, "/") || strings.Contains(pattern, string(filepath.Separator)) {
-				rel := filepath.ToSlash(path)
-				if idx := strings.LastIndex(rel, "/"); idx >= 0 {
-					tail := strings.ToLower(rel[max(0, idx-20):])
-					if m, _ := filepath.Match(strings.ToLower(filepath.ToSlash(pattern)), tail); m {
-						matched = true
-						break
-					}
+				if m, _ := filepath.Match(strings.ToLower(filepath.ToSlash(pattern)), relSlash); m {
+					matched = true
+					break
 				}
 			}
 		}

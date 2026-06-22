@@ -5,8 +5,8 @@ import (
 
 	"github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/noisethanks/stalker-tex/internal/config"
-	"github.com/noisethanks/stalker-tex/internal/tui/style"
+	"github.com/noisethanks/atak/internal/config"
+	"github.com/noisethanks/atak/internal/tui/style"
 )
 
 // WelcomeModel handles first-run path configuration.
@@ -103,7 +103,7 @@ func (m WelcomeModel) Update(msg tea.Msg) (WelcomeModel, tea.Cmd) {
 
 func (m WelcomeModel) View() string {
 	var b strings.Builder
-	b.WriteString(style.StyleTitle.Render("stalker-tex") + "\n")
+	b.WriteString(style.StyleTitle.Render("atak") + "\n")
 	b.WriteString(style.StyleSubtitle.Render("GAMMA texture compressor & backup tool") + "\n\n")
 	b.WriteString(style.StyleBody.Render("Welcome! Let's set up your paths before we begin.") + "\n\n")
 

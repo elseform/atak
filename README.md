@@ -1,99 +1,139 @@
-# stalker-tex
+# ATAK — Anomaly Texture Analysis Kit
 
-A texture compression and backup utility for STALKER GAMMA modlists.
+> Texture compression and backup utility for STALKER GAMMA modlists.
 
-Reduces VRAM usage by compressing uncompressed DDS textures using BCn block
-compression. Ships as a single binary with no runtime dependencies.
+STALKER GAMMA represents a labor of love by hundreds of modders, culminating in a unique and memorable gaming experience. However, the ecosystem ships many texture assets uncompressed. On hardware with limited VRAM, this causes stuttering, hitching, and outright crashes during gameplay. ATAK compresses those textures to BCn block compression formats, dramatically reducing VRAM pressure with minimal visual difference.
 
-![screenshot placeholder]
-
----
-
-## Features
-
-- **Backup & Restore** — create a compressed LZMA archive of your full GAMMA
-  mod directory, restore individual mods if something goes wrong
-- **Texture Scan** — detects uncompressed DDS textures across your modlist,
-  classifies them by type using header data and filename patterns
-- **Compression** — compresses textures using BC1/BC3/BC5/BC7 via texconv,
-  configurable per texture category via `profiles.json`
-- **Single-mod compression** — compress one mod at a time to verify results
-  before running on your full modlist
+**[PLACEHOLDER: X GB → Y GB VRAM · Z% reduction · compressed in N minutes]**
 
 ---
 
 ## Download
 
-Grab the latest binary for your platform from
-[Releases](https://github.com/noisethanks/stalker-tex/releases):
+Grab the latest binary for your platform from [Releases](https://github.com/noisethanks/atak/releases):
 
-- `stalker-tex-linux` — Linux x86-64
-- `stalker-tex-windows.exe` — Windows x86-64
+| Platform | File |
+|---|---|
+| Linux x86-64 | `atak-vX.X.X-linux-x64.tar.gz` |
+| Windows x86-64 | `atak-vX.X.X-windows-x64.zip` |
 
-No installation required. Just run it.
+No installation required.
 
 **Linux:**
 ```bash
-chmod +x stalker-tex-linux
-./stalker-tex-linux
+tar -xzf atak-vX.X.X-linux-x64.tar.gz
+chmod +x atak-linux
+./atak-linux
 ```
 
-**Windows:**
-```
-Double-click stalker-tex-windows.exe, or run from a terminal
-```
+**Windows:** Extract the zip, run `atak-windows.exe` in Windows Terminal or PowerShell.
 
 ---
 
-## Usage
+## First time? Start here.
 
-On first launch, stalker-tex will:
-1. Ask for your GAMMA mods directory path (auto-detected if possible)
-2. Create a default `profiles.json` at `~/.config/stalker-tex/profiles.json`
-   (Linux) or `%AppData%\stalker-tex\profiles.json` (Windows)
+**Back up before you compress. Always.**
 
-**Recommended workflow:**
-1. **Backup first** — always create a backup before compressing anything
-2. **Scan** — let the tool find uncompressed textures in your modlist
-3. **Test on one mod** — use "Run Selected Mod" to compress a single mod and
-   verify it looks correct in game
-4. **Run all** — compress your full modlist once you're confident
+1. Launch ATAK and go to **Backup Manager**
+2. Create a backup of your GAMMA mods directory — this is your safety net
+3. Go to **Scan & Compress**
+4. Let it scan your modlist
+5. Press **[m]** to compress a single mod first — verify it looks right in game
+6. If happy, press **[r]** to compress everything
+7. If something looks wrong, restore from backup and try again
+
+Compression is always in-place. Your originals are gone after compression — that's what the backup is for.
+
+---
+
+## What it does
+
+### Backup & Restore
+- Create compressed LZMA archives of your full GAMMA mods directory
+- Restore individual mods or your entire modlist from backup
+- Verify archive integrity
+
+### Scan & Compress
+ATAK scans your modlist for uncompressed DDS textures and classifies them by type using filename patterns and directory paths. Only textures explicitly matched by a profile are compressed — nothing is touched blindly.
+
+| Profile | Format | Detection |
+|---|---|---|
+| Normal / bump maps | BC5 | `_bump`, `_normal`, `_nrm`, `_norm` |
+| UI / icons | BC3 | `textures/ui/` path |
+| Diffuse / color | BC7 (BC3 fallback) | `_diff`, `_base`, `_col`, `_d` |
+| Specular / gloss | BC3 | `_spec`, `_gloss` |
+| Masks / alpha | BC3 | `_mask`, `_alpha` |
+
+Already-compressed textures are detected and skipped automatically (~24,000 files in a typical GAMMA install).
+
+**Unmatched textures are never touched.** Files that don't match any profile are shown in the scan results but excluded from compression. Add patterns to `profiles.json` to include them.
 
 ---
 
 ## Configuration
 
-User config lives at:
-- Linux: `~/.config/stalker-tex/`
-- Windows: `%AppData%\stalker-tex\`
+Config lives at:
+- **Linux:** `~/.config/atak/`
+- **Windows:** `%AppData%\atak\`
 
-**`config.json`** — paths, worker count, backup level, scan exclusions  
-**`profiles.json`** — compression profiles (texture categories and formats)
+**`config.json`** — mods path, backup path, worker count, compression level, scan exclusions
 
-Edit `profiles.json` to customize which textures get compressed and with which
-BCn format. The file is created with sensible defaults on first run.
-
-Community-tuned `profiles.json` files for specific mod packs can be shared and
-dropped in directly.
+**`profiles.json`** — compression profiles created on first run. Edit freely to customize which textures get compressed and with which format. Community-tuned profiles for specific mod packs can be dropped in directly.
 
 ---
 
-## Building from Source
+## Performance
+
+**[PLACEHOLDER: benchmark table]**
+
+```
+System: [CPU] / [GPU] / [RAM]
+GAMMA version: 0.9.5 — 616 mods
+
+                    Before          After
+VRAM usage:         X.X GB          X.X GB
+Disk space:         XXX GB          XXX GB
+Compression time:   —               XX minutes
+```
+
+**Note on BC7 compression:** BC7 GPU acceleration is not available on Linux — compression is CPU-only and takes approximately 40-60 minutes for large jobs. Windows users benefit from DirectX GPU acceleration. For faster Linux compression, change BC7 profiles to BC3 in `profiles.json` — minimal quality difference for most textures.
+
+Benchmarks welcome — open a GitHub issue or post in the GAMMA Discord.
+
+---
+
+## Known limitations
+
+- BC7 GPU acceleration Linux-only via DirectX — CPU fallback used on Linux
+- Cancelling a compression job deletes the in-progress file — originals untouched
+- 7-Zip backup progress reporting is sparse on large solid archives — the archive is growing even when the progress bar appears stuck
+
+---
+
+## Building from source
 
 Requires Go 1.21+.
 
 ```bash
-git clone https://github.com/noisethanks/stalker-tex
-cd stalker-tex
-go build -o stalker-tex-linux .
+git clone https://github.com/noisethanks/atak
+cd atak
+go build -o atak-linux .
 ```
 
-Release builds (strip debug info, inject version):
+Release build:
 ```bash
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
   -ldflags="-s -w -X main.version=v0.1.0" \
-  -o stalker-tex-linux .
+  -o atak-linux .
 ```
+
+---
+
+## GAMMA
+
+[S.T.A.L.K.E.R. GAMMA](https://www.moddb.com/mods/stalker-gamma) is a large modpack
+for S.T.A.L.K.E.R. Anomaly maintained by Grok. Join the community on
+[Discord](https://discord.gg/stalker-gamma).
 
 ---
 
@@ -111,6 +151,8 @@ Full license text available in-app via the About screen.
 
 ## Support
 
-If stalker-tex saves your VRAM, consider supporting development:
+If ATAK saved your playthrough, consider supporting development:
 
-[Patreon](https://patreon.com/yourname) · [GitHub Sponsors](https://github.com/sponsors/noisethanks)
+**[PLACEHOLDER: linktree link]**
+
+Made by [mrchocolate](https://github.com/noisethanks)

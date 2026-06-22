@@ -9,11 +9,11 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/noisethanks/stalker-tex/internal/archive"
-	"github.com/noisethanks/stalker-tex/internal/config"
-	"github.com/noisethanks/stalker-tex/internal/tools"
-	"github.com/noisethanks/stalker-tex/internal/tui/components"
-	"github.com/noisethanks/stalker-tex/internal/tui/style"
+	"github.com/noisethanks/atak/internal/archive"
+	"github.com/noisethanks/atak/internal/config"
+	"github.com/noisethanks/atak/internal/tools"
+	"github.com/noisethanks/atak/internal/tui/components"
+	"github.com/noisethanks/atak/internal/tui/style"
 )
 
 type backupState int

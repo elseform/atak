@@ -12,7 +12,7 @@ import (
 )
 
 func lockPath() string {
-	return "/tmp/stalker-tex.lock"
+	return "/tmp/atak.lock"
 }
 
 func WriteLock(pid int) error {
@@ -36,7 +36,7 @@ func CheckStaleLock() {
 	}
 	if syscall.Kill(pid, 0) == nil {
 		_ = syscall.Kill(-pid, syscall.SIGKILL)
-		log.Printf("stalker-tex: killed orphan process group %d from previous crash", pid)
+		log.Printf("atak: killed orphan process group %d from previous crash", pid)
 	}
 	_ = os.Remove(lockPath())
 }

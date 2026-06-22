@@ -4,10 +4,10 @@ import (
 	"context"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/noisethanks/stalker-tex/internal/config"
-	"github.com/noisethanks/stalker-tex/internal/scan"
-	"github.com/noisethanks/stalker-tex/internal/tools"
-	"github.com/noisethanks/stalker-tex/internal/tui/screens"
+	"github.com/noisethanks/atak/internal/config"
+	"github.com/noisethanks/atak/internal/scan"
+	"github.com/noisethanks/atak/internal/tools"
+	"github.com/noisethanks/atak/internal/tui/screens"
 )
 
 // Screen identifies which screen is currently active.

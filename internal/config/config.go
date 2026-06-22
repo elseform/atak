@@ -40,10 +40,10 @@ func configDir() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(base, "stalker-tex"), nil
+	return filepath.Join(base, "atak"), nil
 }
 
-// ConfigDir returns the stalker-tex config directory path.
+// ConfigDir returns the atak config directory path.
 func ConfigDir() (string, error) {
 	return configDir()
 }
