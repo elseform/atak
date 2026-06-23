@@ -2,7 +2,7 @@
 
 > Texture compression and backup utility for STALKER GAMMA modlists.
 
-![screenshot placeholder — gameplay screenshot showing performance overlay]
+![ATAK screenshot](atak.png)
 
 STALKER GAMMA represents a labor of love by hundreds of modders, culminating in a unique and memorable gaming experience. However, the ecosystem ships many texture assets uncompressed. On hardware with limited VRAM, this causes stuttering, hitching, and outright crashes during gameplay. ATAK compresses those textures to BCn block compression formats, dramatically reducing VRAM pressure with minimal visual difference.
 
