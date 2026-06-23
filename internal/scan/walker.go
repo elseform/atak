@@ -137,7 +137,8 @@ func matchProfile(path, rel string, profiles []config.Profile) (name, format str
 				break
 			}
 			if strings.Contains(pattern, "/") || strings.Contains(pattern, string(filepath.Separator)) {
-				if m, _ := filepath.Match(strings.ToLower(filepath.ToSlash(pattern)), relSlash); m {
+				stripped := strings.ToLower(strings.Trim(filepath.ToSlash(pattern), "*"))
+				if strings.Contains(relSlash, stripped) {
 					matched = true
 					break
 				}
