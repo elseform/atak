@@ -635,21 +635,47 @@ func setProcAttr(cmd *exec.Cmd)   // set process attributes before Start()
   - On startup: check for stale lockfile, kill stale PID, log warning
   - Lockfile lives in `internal/tools/lockfile.go` (Linux build tag only)
 
-**Windows (v1.0):**
-- `setProcAttr` is a no-op
-- `killProcess` calls `cmd.Process.Kill()` — sufficient for cancel case
-- No lockfile — crash may leave 7zz running; user can kill from Task Manager
-- Document this limitation in README
+**Windows:**
+- `setProcAttr` creates a Windows Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`
+- After `cmd.Start()`, assign subprocess to the Job Object via `AssignProcessToJobObject`
+- When Go process exits (clean or crash), Windows automatically kills all job members
+- `killProcess` calls `cmd.Process.Kill()` directly for the cancel case
+- `CheckStaleLock()` is a no-op on Windows — Job Objects make lockfile unnecessary
+- Uses `golang.org/x/sys/windows` package (~40 lines total)
 
-**Windows (v1.1 — future):**
-- Replace no-op `setProcAttr` with Windows Job Object setup:
-  ```go
-  // Create job with JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-  // Assign subprocess to job after cmd.Start()
-  // When Go process exits (clean or crash), Windows kills all job members
-  ```
-- Self-contained change to `process_windows.go` only — no refactor needed
-- Uses `golang.org/x/sys/windows` package (~50-60 lines total)
+```go
+// process_windows.go outline
+func setProcAttr(cmd *exec.Cmd) (windows.Handle, error) {
+    job, err := windows.CreateJobObject(nil, nil)
+    if err != nil {
+        return 0, err
+    }
+    info := windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION{}
+    info.BasicLimitInformation.LimitFlags = windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    windows.SetInformationJobObject(job,
+        windows.JobObjectExtendedLimitInformation,
+        uintptr(unsafe.Pointer(&info)),
+        uint32(unsafe.Sizeof(info)))
+    return job, nil
+}
+
+func assignToJob(job windows.Handle, cmd *exec.Cmd) {
+    handle, _ := windows.OpenProcess(
+        windows.PROCESS_ALL_ACCESS, false,
+        uint32(cmd.Process.Pid))
+    windows.AssignProcessToJobObject(job, handle)
+    windows.CloseHandle(handle)
+}
+
+func killProcess(cmd *exec.Cmd) {
+    cmd.Process.Kill()
+}
+```
+
+Job handle is created before `cmd.Start()`, subprocess assigned after. Handle
+is stored in the operation context and closed on operation completion — the
+`KILL_ON_JOB_CLOSE` flag means closing the handle kills the subprocess if
+the Go process exits unexpectedly.
 
 ### 5. Settings
 
@@ -826,11 +852,6 @@ To keep maintenance footprint small, the following are explicitly out of scope:
   rescans. Requires a simple local database or JSON state file.
 - **Restore by profile** — restore only mods containing textures that match
   a given profile. Dependent on scan metadata persistence.
-- **Windows Job Object process management** — replace the v1.0 no-op
-  `setProcAttr` on Windows with Job Object setup so crashed Go processes
-  automatically kill orphaned 7zz/texconv subprocesses. Self-contained change
-  to `internal/tools/process_windows.go` only, ~50-60 lines using
-  `golang.org/x/sys/windows`. No refactor needed.
 - **stalker-update** — separate binary, same visual identity, handles GAMMA
   mod updates selectively. Dependent on community reception of atak.
 

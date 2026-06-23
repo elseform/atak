@@ -87,9 +87,13 @@ func runOnce(ctx context.Context, texconvPath, inputPath, format, outputDir stri
 	var stderrBuf bytes.Buffer
 	cmd.Stderr = &stderrBuf
 
+	job, _ := tools.NewJob()
 	if startErr := cmd.Start(); startErr != nil {
+		tools.CloseJob(job)
 		return false, "", fmt.Errorf("texconv: %w", startErr), 0
 	}
+	tools.AssignJob(job, cmd)
+	defer tools.CloseJob(job)
 	_ = tools.WriteLock(cmd.Process.Pid)
 
 	processExited := make(chan struct{})

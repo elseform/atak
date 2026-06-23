@@ -83,10 +83,14 @@ func Backup(ctx context.Context, sevenZipPath, modsDir, outputPath string, backu
 			done <- err
 			return
 		}
+		job, _ := tools.NewJob()
 		if err := cmd.Start(); err != nil {
+			tools.CloseJob(job)
 			done <- err
 			return
 		}
+		tools.AssignJob(job, cmd)
+		defer tools.CloseJob(job)
 		_ = tools.WriteLock(cmd.Process.Pid)
 
 		processExited := make(chan struct{})
@@ -145,10 +149,14 @@ func Restore(ctx context.Context, sevenZipPath, archivePath, modName, modDir str
 			done <- err
 			return
 		}
+		job, _ := tools.NewJob()
 		if err := cmd.Start(); err != nil {
+			tools.CloseJob(job)
 			done <- err
 			return
 		}
+		tools.AssignJob(job, cmd)
+		defer tools.CloseJob(job)
 
 		scanner := bufio.NewScanner(stderr)
 		for scanner.Scan() {
@@ -187,10 +195,14 @@ func RestoreAll(ctx context.Context, sevenZipPath, archivePath, modsParentDir st
 			done <- err
 			return
 		}
+		job, _ := tools.NewJob()
 		if err := cmd.Start(); err != nil {
+			tools.CloseJob(job)
 			done <- err
 			return
 		}
+		tools.AssignJob(job, cmd)
+		defer tools.CloseJob(job)
 		_ = tools.WriteLock(cmd.Process.Pid)
 
 		processExited := make(chan struct{})
