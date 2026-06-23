@@ -22,7 +22,7 @@
     },
     {
       "name": "Diffuse / Color",
-      "format": "BC7_UNORM",
+      "format": "BC3_UNORM",
       "generateMips": true,
       "patterns": [
         "*_d.*", "*_diff.*", "*_diffuse.*",

@@ -134,7 +134,7 @@ func LoadProfiles() ([]Profile, []string, bool, error) {
 func defaultConfig() *Config {
 	return &Config{
 		ModsDir:        detectModsDir(),
-		WorkerCount:    max(1, runtime.NumCPU()/4),
+		WorkerCount:    1,
 		BackupLevel:    6,
 		ScanExclusions: []string{".*", "downloads", "Downloads"},
 	}

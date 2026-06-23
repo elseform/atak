@@ -129,7 +129,7 @@ func (m OperationScreen) View() string {
 		b.WriteString(m.bar.ViewAs(m.percent) + "\n")
 	}
 	if m.status != "" {
-		const label = "  Processing: "
+		const label = "  Last completed: "
 		status := m.status
 		if m.width > 0 {
 			max := m.width - len(label)

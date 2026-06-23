@@ -89,6 +89,15 @@ Config lives at:
 Benchmarks and feedback welcome — open a GitHub issue or post in the GAMMA Discord.
 
 ---
+## Compression quality
+
+Default profiles use BC3 for all textures except normal maps (BC5).
+BC3 produces minimal visible quality loss at typical STALKER viewing 
+distances and is significantly faster to compress on Linux.
+
+For higher quality diffuse textures at the cost of longer compression 
+time, change `"format": "BC3_UNORM"` to `"format": "BC7_UNORM"` in 
+the Diffuse/Color profile in `profiles.json`.
 
 ## Known limitations
 
