@@ -1,4 +1,4 @@
-//go:build linux
+//go:build linux || darwin
 
 package tools
 
@@ -16,7 +16,7 @@ func lockPath() string {
 }
 
 func WriteLock(pid int) error {
-	return os.WriteFile(lockPath(), []byte(fmt.Sprintf("%d\n", pid)), 0600)
+	return os.WriteFile(lockPath(), fmt.Appendf(nil, "%d\n", pid), 0600)
 }
 
 func ClearLock() error {

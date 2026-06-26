@@ -25,6 +25,15 @@ builds:
       - -s -w -X main.version={{.Version}}
     binary: atak-windows
 
+  - id: macos
+    goos: [darwin]
+    goarch: [amd64]
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+    binary: atak-macos
+
 archives:
   - id: linux
     builds: [linux]
@@ -39,6 +48,15 @@ archives:
     builds: [windows]
     format: zip
     name_template: "atak-{{.Version}}-windows-x64"
+    files:
+      - README.md
+      - SPEC.md
+      - THIRD_PARTY_LICENSES.txt
+
+  - id: macos
+    builds: [macos]
+    format: tar.gz
+    name_template: "atak-{{.Version}}-macos-x64"
     files:
       - README.md
       - SPEC.md
@@ -62,13 +80,14 @@ release:
     ### Download
     - **Linux:** `atak-{{.Version}}-linux-x64.tar.gz`
     - **Windows:** `atak-{{.Version}}-windows-x64.zip`
+    - **macOS (Intel):** `atak-{{.Version}}-macos-x64.tar.gz`
 
     ### Installation
-    **Linux:**
+    **Linux / macOS:**
     ```bash
-    tar -xzf atak-{{.Version}}-linux-x64.tar.gz
-    chmod +x atak-linux
-    ./atak-linux
+    tar -xzf atak-{{.Version}}-linux-x64.tar.gz  # or macos-x64
+    chmod +x atak-linux  # or atak-macos
+    ./atak-linux         # or ./atak-macos
     ```
     **Windows:** Extract the zip and run `atak-windows.exe`
 
