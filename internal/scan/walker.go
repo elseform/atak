@@ -51,6 +51,10 @@ func Walk(modsDir string, profiles []config.Profile, excludePatterns []string, e
 			if !strings.EqualFold(filepath.Ext(path), ".dds") {
 				return nil
 			}
+			if fi, fiErr := d.Info(); fiErr == nil && fi.Size() < 512 {
+				skipped++
+				return nil
+			}
 
 			info, err := ParseDDS(path)
 			if err != nil {
