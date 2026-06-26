@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/noisethanks/atak/internal/scan"
 	"github.com/noisethanks/atak/internal/tools"
@@ -56,6 +57,13 @@ func Run(ctx context.Context, texconvPath string, asset scan.Asset, format strin
 			Stderr:       stderr,
 			Before:       before,
 		}
+	}
+	// texconv always lowercases output extension; on Linux case-sensitive fs this
+	// creates a new file, leaving the original untouched. Rename to match original.
+	ext := filepath.Ext(asset.Path)
+	texconvOut := filepath.Join(outputDir, strings.TrimSuffix(filepath.Base(asset.Path), ext)+".dds")
+	if !strings.EqualFold(texconvOut, asset.Path) || texconvOut != asset.Path {
+		os.Rename(texconvOut, asset.Path)
 	}
 	return CompressionResult{
 		Asset:        asset,

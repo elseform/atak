@@ -19,13 +19,17 @@ directory on startup, cleaned up on exit.
 
 ```
 bin/
-├── texconv-linux       # community Linux port of Microsoft's texconv
-├── texconv-windows.exe # official Microsoft build
-├── 7zz                 # 7-Zip standalone Linux binary
-└── 7zz.exe             # 7-Zip standalone Windows binary
+├── texconv-linux           # community Linux port of Microsoft's texconv
+├── texconv-windows.exe     # official Microsoft build
+├── texconv-macos-x64       # matyalatte macOS Intel build
+├── texconv-macos-arm64     # matyalatte macOS Apple Silicon build
+├── 7zz                     # 7-Zip standalone Linux binary
+├── 7zz.exe                 # 7-Zip standalone Windows binary
+├── 7zz-macos-x64           # 7-Zip standalone macOS Intel binary
+└── 7zz-macos-arm64         # 7-Zip standalone macOS ARM64 binary
 ```
 
-Build tag pattern — same variable name on both platforms, different file:
+Build tag pattern — same variable name on all platforms, different file:
 
 ```go
 //go:build linux
@@ -47,14 +51,34 @@ var texconvBin []byte
 var sevenZipBin []byte
 ```
 
+```go
+//go:build darwin && amd64
+
+//go:embed bin/texconv-macos-x64
+var texconvBin []byte
+
+//go:embed bin/7zz-macos-x64
+var sevenZipBin []byte
+```
+
+```go
+//go:build darwin && arm64
+
+//go:embed bin/texconv-macos-arm64
+var texconvBin []byte
+
+//go:embed bin/7zz-macos-arm64
+var sevenZipBin []byte
+```
+
 On startup:
 1. Extract both binaries to `os.MkdirTemp`
 2. `chmod 0755` both (no-op on Windows, harmless)
 3. Store paths in an `EmbeddedTools` struct passed through the app
 4. `defer tools.Cleanup()` in main
 
-No other runtime dependencies. The binary must run on any x86-64 Linux or
-Windows machine without the user installing anything.
+No other runtime dependencies. The binary must run on any supported platform
+without the user installing anything.
 
 ---
 
@@ -65,6 +89,7 @@ Config directory is platform-aware via `os.UserConfigDir()` — no hardcoded pat
 ```
 Linux:   ~/.config/atak/
 Windows: %AppData%\atak\
+macOS:   ~/Library/Application Support/atak/
 ```
 
 Each contains:
@@ -133,8 +158,8 @@ with broadly correct STALKER conventions but users are expected to tune it:
       "patterns": ["*/textures/ui/*", "*_icons.*"]
     },
     {
-      "name": "Diffuse / Color (RGBA)",
-      "format": "BC7_UNORM",
+      "name": "Diffuse / Color",
+      "format": "BC3_UNORM",
       "generateMips": true,
       "patterns": [
         "*_d.*", "*_diff.*", "*_diffuse.*",
@@ -143,12 +168,6 @@ with broadly correct STALKER conventions but users are expected to tune it:
         "*_c.*", "*_b.*", "*_rgb.*",
         "*_details.*"
       ]
-    },
-    {
-      "name": "Diffuse / Color (RGB)",
-      "format": "BC1_UNORM",
-      "generateMips": true,
-      "patterns": []
     },
     {
       "name": "Specular / Gloss",
@@ -161,18 +180,44 @@ with broadly correct STALKER conventions but users are expected to tune it:
       "format": "BC3_UNORM",
       "generateMips": true,
       "patterns": ["*_mask.*", "*_alpha.*"]
+    },
+    {
+      "name": "Sky Textures",
+      "format": "BC3_UNORM",
+      "generateMips": true,
+      "patterns": ["*/textures/sky/*"]
+    },
+    {
+      "name": "Detail / Terrain",
+      "format": "BC3_UNORM",
+      "generateMips": true,
+      "patterns": ["*/textures/detail/*"]
+    },
+    {
+      "name": "Flares / FX",
+      "format": "BC3_UNORM",
+      "generateMips": false,
+      "patterns": ["*/textures/anamflares/*", "*/textures/flares/*"]
+    },
+    {
+      "name": "UI Readables",
+      "format": "BC3_UNORM",
+      "generateMips": false,
+      "patterns": ["*/textures/ui/readables/*", "*/textures/ui/npe/*"]
     }
   ]
 }
 ```
 
 Notes:
-- Diffuse/Color uses BC7_UNORM with automatic BC3_UNORM fallback (see Compression Execution)
-- BC1_UNORM for opaque RGB diffuse — matched by header (HasAlpha == false) not patterns,
-  since RGB-only files have no reliable naming convention
+- All profiles default to BC3_UNORM except Normal Maps (BC5 required for two-channel
+  normal data) — BC3 is safe, fast, and well-supported across all XRay engine versions
+- BC7_UNORM produces better quality for diffuse textures but is CPU-intensive on Linux
+  (no GPU acceleration) and caused issues in testing — power users can change
+  Diffuse/Color to BC7_UNORM in their profiles.json
+- The BC7 → BC3 automatic fallback in texconv.go remains as a safety net for any
+  profile that uses BC7
 - Normal map patterns expanded to match bash script proven conventions
-- BC7 is confirmed supported by XRay engine — the previous crash was caused by
-  Auto buckets compressing engine-specific textures, not BC7 itself
 
 **Unmatched files** — DDS files that don't match any profile pattern are surfaced in
 scan results as a separate "Unmatched" bucket. The user can assign them a format
@@ -574,6 +619,21 @@ remains — it is still needed to show the OperationScreen during compression.
 - **BC7 → BC3 automatic fallback:** If texconv exits non-zero with BC7_UNORM,
   automatically retry with BC3_UNORM. Matches proven bash script behavior.
   CompressionResult records the actual format used after fallback.
+
+- **Extension case preservation:** texconv lowercases the output extension by
+  default — `texture.DDS` becomes `texture.dds`. On Linux (case-sensitive
+  filesystem) this creates a second file, leaving the original uncompressed
+  `.DDS` file untouched. Fix: after successful texconv run, if the output path
+  differs from the original asset path in case only, rename the output to match
+  the original filename exactly via `os.Rename`. This ensures the original file
+  is always overwritten regardless of extension case.
+  ```go
+  texconvOut := filepath.Join(outputDir,
+      strings.TrimSuffix(filepath.Base(asset.Path), ext) + ".dds")
+  if !strings.EqualFold(texconvOut, asset.Path) || texconvOut != asset.Path {
+      os.Rename(texconvOut, asset.Path)
+  }
+  ```
 - Capture stdout/stderr per file into `CompressionResult`
 - Emit `compressionDoneMsg` per file — adapted to feed shared `OperationScreen`
   component with:
@@ -832,8 +892,7 @@ Implementation notes:
 
 To keep maintenance footprint small, the following are explicitly out of scope:
 
-- macOS support (not a GAMMA platform)
-- 32-bit builds (x86-64 only)
+- 32-bit builds (x86-64 and ARM64 only)
 - Plugin or extension system
 - Network features (no auto-update, no telemetry, no download)
 - Support for archive formats other than 7z
@@ -881,7 +940,13 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build   -ldflags="-s -w -X main.version
 # Release — Windows x86-64
 CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build   -ldflags="-s -w -X main.version=v0.1.0"   -o atak-windows.exe ./main.go
 
-# goreleaser handles both targets in CI — version injected from git tag
+# Release — macOS Intel
+CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build   -ldflags="-s -w -X main.version=v0.1.0"   -o atak-macos-x64 ./main.go
+
+# Release — macOS Apple Silicon
+CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build   -ldflags="-s -w -X main.version=v0.1.0"   -o atak-macos-arm64 ./main.go
+
+# goreleaser handles all targets in CI — version injected from git tag
 ```
 
 Version is injected at build time via `-X main.version=<tag>`. In development
@@ -891,17 +956,26 @@ builds without the flag, version displays as `dev`.
 
 - `linux/amd64` — primary, tested by maintainer
 - `windows/amd64` — supported, community-tested
+- `darwin/amd64` — macOS Intel, community-tested
+- `darwin/arm64` — macOS Apple Silicon, community-tested
 
 The `-s -w` flags strip debug info. Final binaries should be under 25MB including
 all embedded tools (texconv + 7zz per platform).
 
 ## Cross-Platform Rules
 
-These must be followed in every file or Windows support silently breaks:
+These must be followed in every file or platform support silently breaks:
 
 - **Never** use `/` as a path separator. Always `filepath.Join`.
 - **Never** hardcode `~/.config`. Always `os.UserConfigDir()`.
 - **Never** assume execute permissions need setting on Windows — `chmod` calls
-  must be gated behind a `//go:build linux` file or a runtime `runtime.GOOS` check.
+  must be gated behind a build tag or `runtime.GOOS` check.
 - All subprocess invocations via `exec.Command` use the extracted binary path
   from `EmbeddedTools` — never a hardcoded binary name.
+- **Extension case:** Never assume `.dds` — always preserve the original file's
+  extension case when writing output. Use `os.Rename` to match original case.
+- **macOS:** `os.UserConfigDir()` returns `~/Library/Application Support` —
+  no special handling needed, already correct via the stdlib.
+- **macOS process management:** Same as Linux — `syscall.SysProcAttr{Setpgid: true}`
+  and `syscall.Kill(-pid, syscall.SIGKILL)` work on Darwin. `process_linux.go`
+  build tag should be changed to `//go:build linux || darwin`.
