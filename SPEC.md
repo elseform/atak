@@ -19,15 +19,16 @@ directory on startup, cleaned up on exit.
 
 ```
 bin/
-├── texconv-linux           # community Linux port of Microsoft's texconv
-├── texconv-windows.exe     # official Microsoft build
-├── texconv-macos-x64       # matyalatte macOS Intel build
-├── texconv-macos-arm64     # matyalatte macOS Apple Silicon build
-├── 7zz                     # 7-Zip standalone Linux binary
-├── 7zz.exe                 # 7-Zip standalone Windows binary
-├── 7zz-macos-x64           # 7-Zip standalone macOS Intel binary
-└── 7zz-macos-arm64         # 7-Zip standalone macOS ARM64 binary
+├── texconv-linux       # community Linux port of Microsoft's texconv
+├── texconv-windows.exe # official Microsoft build
+├── texconv-macos       # matyalatte macOS universal binary (Intel + Apple Silicon)
+├── 7zz                 # 7-Zip standalone Linux binary
+├── 7zz.exe             # 7-Zip standalone Windows binary
+└── 7zz-macos           # 7-Zip standalone macOS universal binary (Intel + Apple Silicon)
 ```
+
+macOS universal binaries contain both x86-64 and ARM64 slices — one binary covers
+all Mac hardware. No need to split darwin/amd64 and darwin/arm64 build tags.
 
 Build tag pattern — same variable name on all platforms, different file:
 
@@ -52,22 +53,12 @@ var sevenZipBin []byte
 ```
 
 ```go
-//go:build darwin && amd64
+//go:build darwin
 
-//go:embed bin/texconv-macos-x64
+//go:embed bin/texconv-macos
 var texconvBin []byte
 
-//go:embed bin/7zz-macos-x64
-var sevenZipBin []byte
-```
-
-```go
-//go:build darwin && arm64
-
-//go:embed bin/texconv-macos-arm64
-var texconvBin []byte
-
-//go:embed bin/7zz-macos-arm64
+//go:embed bin/7zz-macos
 var sevenZipBin []byte
 ```
 
@@ -128,6 +119,12 @@ Implemented as a dedicated screen `internal/tui/screens/firstrun.go`.
 The user owns `profiles.json` from this point forward — the tool never
 overwrites it on subsequent launches.
 
+**Profile ordering matters** — profiles are matched in order, first match wins.
+More specific path patterns must come before more general ones:
+- `*/textures/ui/readables/*` must appear before `*/textures/ui/*`
+- `*/textures/sky/night/*` must appear before `*/textures/sky/*`
+- Filename suffix patterns (`*_bump.*`) are order-independent since they don't overlap
+
 **The embedded default** (`configs/compression_profiles.json`) is the seed — it ships
 with broadly correct STALKER conventions but users are expected to tune it:
 
@@ -139,6 +136,18 @@ with broadly correct STALKER conventions but users are expected to tune it:
     "*detail_map*", "*_hm.*"
   ],
   "profiles": [
+    {
+      "name": "UI Readables",
+      "format": "BC3_UNORM",
+      "generateMips": false,
+      "patterns": ["*/textures/ui/readables/*", "*/textures/ui/npe/*"]
+    },
+    {
+      "name": "Flares / FX",
+      "format": "BC3_UNORM",
+      "generateMips": false,
+      "patterns": ["*/textures/anamflares/*", "*/textures/flares/*"]
+    },
     {
       "name": "Normal Maps",
       "format": "BC5_UNORM",
@@ -192,18 +201,6 @@ with broadly correct STALKER conventions but users are expected to tune it:
       "format": "BC3_UNORM",
       "generateMips": true,
       "patterns": ["*/textures/detail/*"]
-    },
-    {
-      "name": "Flares / FX",
-      "format": "BC3_UNORM",
-      "generateMips": false,
-      "patterns": ["*/textures/anamflares/*", "*/textures/flares/*"]
-    },
-    {
-      "name": "UI Readables",
-      "format": "BC3_UNORM",
-      "generateMips": false,
-      "patterns": ["*/textures/ui/readables/*", "*/textures/ui/npe/*"]
     }
   ]
 }
@@ -564,6 +561,10 @@ Surfaced in the Settings screen as an editable list — users can add or remove 
 **Hardcoded exclusions (never user-configurable):**
 - Files where `DDSInfo.Compressed == true` — never re-compress already compressed textures
 - Files without `.dds` extension — only DDS files are processed
+- Files smaller than 512 bytes — stub/placeholder files too small to contain real texture
+  data. Compressing these produces garbage output that can cause visual artifacts in-game
+  (e.g. leopard print pattern on surfaces). Counted in the skipped total, not surfaced
+  as errors.
 
 ### 4. Compress
 
@@ -940,11 +941,8 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build   -ldflags="-s -w -X main.version
 # Release — Windows x86-64
 CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build   -ldflags="-s -w -X main.version=v0.1.0"   -o atak-windows.exe ./main.go
 
-# Release — macOS Intel
-CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build   -ldflags="-s -w -X main.version=v0.1.0"   -o atak-macos-x64 ./main.go
-
-# Release — macOS Apple Silicon
-CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build   -ldflags="-s -w -X main.version=v0.1.0"   -o atak-macos-arm64 ./main.go
+# Release — macOS (universal embedded tools, Go binary is amd64)
+CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build   -ldflags="-s -w -X main.version=v0.1.0"   -o atak-macos ./main.go
 
 # goreleaser handles all targets in CI — version injected from git tag
 ```
@@ -956,8 +954,11 @@ builds without the flag, version displays as `dev`.
 
 - `linux/amd64` — primary, tested by maintainer
 - `windows/amd64` — supported, community-tested
-- `darwin/amd64` — macOS Intel, community-tested
-- `darwin/arm64` — macOS Apple Silicon, community-tested
+- `darwin/amd64` — macOS universal binary (Intel + Apple Silicon), community-tested
+
+Note: goreleaser only needs one darwin target since the embedded binaries are
+universal. The Go binary itself is architecture-specific but the embedded tools
+work on both Intel and Apple Silicon.
 
 The `-s -w` flags strip debug info. Final binaries should be under 25MB including
 all embedded tools (texconv + 7zz per platform).
