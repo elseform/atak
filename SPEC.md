@@ -207,7 +207,8 @@ with broadly correct STALKER conventions but users are expected to tune it:
   "excludePatterns": [
     "fx_sun*", "fx_*",
     "*_lm.*", "*_cm.*", "*_nm2.*",
-    "*detail_map*", "*_hm.*"
+    "*detail_map*", "*_hm.*",
+    "lut_*"
   ],
   "profiles": [
     {
@@ -274,11 +275,59 @@ with broadly correct STALKER conventions but users are expected to tune it:
       "name": "Detail / Terrain",
       "format": "BC3_UNORM",
       "generateMips": true,
-      "patterns": ["*/textures/detail/*"]
+      "patterns": ["*/textures/detail/*", "*/textures/terrain/*"]
+    },
+    {
+      "name": "Weapon Textures",
+      "format": "BC3_UNORM",
+      "generateMips": true,
+      "patterns": [
+        "*/textures/wpn/*",
+        "*/textures/rwap/*",
+        "*/textures/bonus_sights/*",
+        "wpn_crosshair*"
+      ]
+    },
+    {
+      "name": "Character / Hands",
+      "format": "BC3_UNORM",
+      "generateMips": true,
+      "patterns": ["*/textures/act/*", "*/textures/MK/*"]
+    },
+    {
+      "name": "Items",
+      "format": "BC3_UNORM",
+      "generateMips": true,
+      "patterns": [
+        "*/textures/items/*",
+        "*/textures/item/*",
+        "*/textures/usable_items/*",
+        "*/textures/farcry4/*",
+        "*/textures/artifact/*",
+        "*/textures/gwr/*"
+      ]
+    },
+    {
+      "name": "Custom UI",
+      "format": "BC3_UNORM",
+      "generateMips": false,
+      "patterns": ["*/textures/catsy/*"]
+    },
+    {
+      "name": "Particle / FX",
+      "format": "BC3_UNORM",
+      "generateMips": false,
+      "patterns": ["*/textures/semitone/*"]
     }
   ]
 }
 ```
+
+Note: Weapon Textures and Character/Hands use BC3 in `default.json` for safety
+and Linux CPU performance. The `quality.json` profile upgrades these to BC7 for
+users who want better visual quality on high-detail weapon and character textures.
+These are the textures players look at most closely — BC7 makes a visible
+difference here more than anywhere else.
 
 Notes:
 - All profiles default to BC3_UNORM except Normal Maps (BC5 required for two-channel
@@ -624,11 +673,13 @@ using `filepath.Match`.
 
 Default value shipped in config:
 ```json
-"scanExclusions": [".*", "downloads", "Downloads"]
+"scanExclusions": [".*", "downloads", "Downloads", "G.A.M.M.A. UI"]
 ```
 
 - `.*` — skips all hidden directories (e.g. `.Grok's Modpack Installer`, `.git`)
 - `downloads` / `Downloads` — skips the GAMMA downloads folder (both cases for Linux)
+- `G.A.M.M.A. UI` — skips the GAMMA UI mod directory. Compressing main menu assets
+  causes excessive loading times — confirmed by community testing
 
 Surfaced in the Settings screen as an editable list — users can add or remove patterns.
 
@@ -1001,9 +1052,13 @@ Users drop these into `~/.config/atak/profiles.json` to switch configurations.
 Community members can contribute profiles for specific mod packs as PRs —
 low barrier to contribution, high value for the ecosystem.
 
-`quality.json` is identical to `default.json` except Diffuse/Color uses
-`BC7_UNORM` instead of `BC3_UNORM`. Power users on Windows with discrete
-GPUs (where BC7 is GPU-accelerated) will prefer this.
+`quality.json` differs from `default.json` in these profiles (BC7 instead of BC3):
+- Weapon Textures — players look at these up close constantly
+- Character / Hands — high detail, visible at close range
+- Diffuse / Color — general quality upgrade for named diffuse textures
+
+Recommended for: Windows users with discrete GPUs (BC7 is GPU-accelerated on Windows).
+Not recommended for: Linux users doing large compression jobs (BC7 is CPU-only on Linux).
 
 ---
 

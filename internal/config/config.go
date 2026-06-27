@@ -139,7 +139,7 @@ func defaultConfig() *Config {
 		ModsDir:        detectModsDir(),
 		WorkerCount:    1,
 		BackupLevel:    6,
-		ScanExclusions: []string{".*", "downloads", "Downloads"},
+		ScanExclusions: []string{".*", "downloads", "Downloads", "G.A.M.M.A. UI"},
 	}
 }
 
