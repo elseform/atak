@@ -1,5 +1,6 @@
 {
   "_note": "Profile order matters — first match wins. Specific path patterns (ui/readables, flares) must precede general ones (ui/*, fx_*).",
+  "minFileSizeBytes": 1024,
   "excludePatterns": [
     "fx_sun*", "fx_*",
     "*_lm.*", "*_cm.*", "*_nm2.*",

@@ -22,8 +22,9 @@ type Profile struct {
 }
 
 type profileFile struct {
-	ExcludePatterns []string  `json:"excludePatterns,omitempty"`
-	Profiles        []Profile `json:"profiles"`
+	ExcludePatterns  []string  `json:"excludePatterns,omitempty"`
+	MinFileSizeBytes int       `json:"minFileSizeBytes,omitempty"`
+	Profiles         []Profile `json:"profiles"`
 }
 
 // Config holds all user-persisted preferences.
@@ -101,34 +102,36 @@ func IsFirstRun() bool {
 	return errors.Is(err, os.ErrNotExist)
 }
 
-// LoadProfiles returns compression profiles and global exclude patterns, preferring
-// user override if present. created is true when profiles.json was just written for
-// the first time.
-func LoadProfiles() ([]Profile, []string, bool, error) {
+// LoadProfiles returns compression profiles, global exclude patterns, minimum file
+// size in bytes, and whether profiles.json was just created for the first time.
+func LoadProfiles() ([]Profile, []string, int, bool, error) {
 	dir, err := configDir()
 	if err != nil {
-		return nil, nil, false, err
+		return nil, nil, 0, false, err
 	}
 	userPath := filepath.Join(dir, "profiles.json")
 	data, err := os.ReadFile(userPath)
 	created := false
 	if errors.Is(err, os.ErrNotExist) {
 		if err := os.MkdirAll(dir, 0755); err != nil {
-			return nil, nil, false, err
+			return nil, nil, 0, false, err
 		}
 		if err := os.WriteFile(userPath, defaultProfilesJSON, 0644); err != nil {
-			return nil, nil, false, err
+			return nil, nil, 0, false, err
 		}
 		data = defaultProfilesJSON
 		created = true
 	} else if err != nil {
-		return nil, nil, false, err
+		return nil, nil, 0, false, err
 	}
 	var pf profileFile
 	if err := json.Unmarshal(data, &pf); err != nil {
-		return nil, nil, false, err
+		return nil, nil, 0, false, err
 	}
-	return pf.Profiles, pf.ExcludePatterns, created, nil
+	if pf.MinFileSizeBytes == 0 {
+		pf.MinFileSizeBytes = 1024
+	}
+	return pf.Profiles, pf.ExcludePatterns, pf.MinFileSizeBytes, created, nil
 }
 
 func defaultConfig() *Config {

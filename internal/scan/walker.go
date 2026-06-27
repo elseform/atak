@@ -27,7 +27,7 @@ type Asset struct {
 // Excluded:true and ProfileMatch:"Excluded". exclusions are directory-name globs from
 // config.json — matched directories are skipped entirely.
 // Returns three channels: assets, skipped count (one value sent on completion), and errors.
-func Walk(modsDir string, profiles []config.Profile, excludePatterns []string, exclusions []string) (<-chan Asset, <-chan int, <-chan error) {
+func Walk(modsDir string, profiles []config.Profile, excludePatterns []string, exclusions []string, minFileSizeBytes int) (<-chan Asset, <-chan int, <-chan error) {
 	assets := make(chan Asset, 256)
 	skippedCh := make(chan int, 1)
 	errs := make(chan error, 1)
@@ -51,7 +51,7 @@ func Walk(modsDir string, profiles []config.Profile, excludePatterns []string, e
 			if !strings.EqualFold(filepath.Ext(path), ".dds") {
 				return nil
 			}
-			if fi, fiErr := d.Info(); fiErr == nil && fi.Size() < 512 {
+			if fi, fiErr := d.Info(); fiErr == nil && fi.Size() < int64(minFileSizeBytes) {
 				skipped++
 				return nil
 			}

@@ -38,7 +38,7 @@ func NewResults(data ScanResultData, cfg *config.Config) ResultsModel {
 	groupIdx := make(map[string]int) // profile name -> index in ordered
 
 	// Pre-populate all named profiles so zero-hit profiles still render.
-	profiles, _, _, _ := config.LoadProfiles()
+	profiles, _, _, _, _ := config.LoadProfiles()
 	for _, p := range profiles {
 		groupIdx[p.Name] = len(ordered)
 		ordered = append(ordered, AssetGroup{
@@ -151,7 +151,7 @@ func (m ResultsModel) buildJobs(scope int, selectedProfile, selectedMod string) 
 	groups := m.groups
 	cfg := m.cfg
 	return func() tea.Msg {
-		profiles, _, _, _ := config.LoadProfiles()
+		profiles, _, _, _, _ := config.LoadProfiles()
 		mipsFor := func(name string) bool {
 			for _, p := range profiles {
 				if p.Name == name {

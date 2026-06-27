@@ -119,6 +119,80 @@ Implemented as a dedicated screen `internal/tui/screens/firstrun.go`.
 The user owns `profiles.json` from this point forward — the tool never
 overwrites it on subsequent launches.
 
+## profiles.json Format Reference
+
+```json
+{
+  "minFileSizeBytes": 1024,
+  "excludePatterns": ["fx_sun*", "fx_*"],
+  "profiles": [
+    {
+      "name": "Profile Name",
+      "format": "BC3_UNORM",
+      "generateMips": true,
+      "patterns": ["*_bump.*", "*/textures/sky/*"],
+      "exclude": ["*_bump_detail.*"]
+    }
+  ]
+}
+```
+
+### Fields
+
+**Top level:**
+- `minFileSizeBytes` — integer, default 1024. Files smaller than this value are
+  skipped silently. Protects against compressing stub/placeholder textures which
+  produce garbage output (e.g. leopard print artifacts).
+- `excludePatterns` — array of glob patterns matched against filename (basename).
+  Files matching any pattern are never compressed regardless of profile match.
+
+**Per profile:**
+- `name` — display name shown in scan results UI
+- `format` — BCn compression format. Valid values:
+  - `BC1_UNORM` — opaque textures, no alpha. Smallest file size (0.5 bytes/texel).
+    Best for: opaque diffuse, environment textures without transparency
+  - `BC3_UNORM` — color + alpha (DXT5). Good quality, wide engine support (1 byte/texel).
+    Best for: UI, textures with alpha, general purpose safe default
+  - `BC4_UNORM` — single channel grayscale. Good for masks, AO maps (0.5 bytes/texel)
+  - `BC5_UNORM` — two channel XY normal map data. Required for bump/normal maps (1 byte/texel).
+    Do not use BC3 for normal maps — it will produce incorrect lighting
+  - `BC7_UNORM` — high quality color + alpha. Best visual quality (1 byte/texel).
+    GPU-accelerated on Windows, CPU-only on Linux (~40-60 min for large jobs).
+    Best for: high quality diffuse, detailed character/weapon textures
+- `generateMips` — whether to generate a full mip chain during compression.
+  `true` for most textures (enables LOD). `false` for UI textures (displayed
+  at exact pixel size, mips waste space and can cause blurring)
+- `patterns` — array of glob patterns matched against filename OR full relative
+  path. Path patterns must contain `/`. Order matters — first match wins.
+  Examples:
+  - `*_bump.*` — matches any file with `_bump` before the extension
+  - `*/textures/sky/*` — matches any file under a `textures/sky/` directory
+  - `*_d.*` — matches files ending in `_d` before the extension
+- `exclude` — optional array of glob patterns. Files matching the profile's
+  `patterns` but also matching `exclude` are skipped. Use for exceptions
+  within a broad pattern.
+
+### Pattern matching rules
+- `*` matches any sequence of characters except `/`
+- Patterns without `/` are matched against the filename only (basename)
+- Patterns containing `/` are matched against the full relative path from modsDir
+- Matching is case-insensitive on all platforms
+- More specific patterns must appear before general ones (first match wins)
+
+### Compression format quick reference
+
+| Format | Quality | Size | Alpha | GPU accel Linux | Use for |
+|--------|---------|------|-------|-----------------|---------|
+| BC1 | Good | 0.5 bpt | No | Yes | Opaque diffuse |
+| BC3 | Good | 1 bpt | Yes | Yes | UI, general alpha |
+| BC4 | Good | 0.5 bpt | No | Yes | Grayscale/masks |
+| BC5 | Excellent | 1 bpt | No | Yes | Normal maps only |
+| BC7 | Excellent | 1 bpt | Yes | No (CPU only) | High quality diffuse |
+
+bpt = bytes per texel
+
+---
+
 **Profile ordering matters** — profiles are matched in order, first match wins.
 More specific path patterns must come before more general ones:
 - `*/textures/ui/readables/*` must appear before `*/textures/ui/*`
@@ -561,10 +635,20 @@ Surfaced in the Settings screen as an editable list — users can add or remove 
 **Hardcoded exclusions (never user-configurable):**
 - Files where `DDSInfo.Compressed == true` — never re-compress already compressed textures
 - Files without `.dds` extension — only DDS files are processed
-- Files smaller than 512 bytes — stub/placeholder files too small to contain real texture
-  data. Compressing these produces garbage output that can cause visual artifacts in-game
-  (e.g. leopard print pattern on surfaces). Counted in the skipped total, not surfaced
-  as errors.
+
+**Configurable exclusions (in profiles.json):**
+- `minFileSizeBytes` — top-level field in profiles.json, default 1024. Files smaller
+  than this value are skipped. Stub/placeholder textures are typically under 200 bytes;
+  the smallest real usable texture (16x16 uncompressed RGBA) is ~1KB. Counted in the
+  skipped total, not surfaced as errors. Users can lower this if they have legitimate
+  tiny textures, or raise it to skip small textures entirely.
+  ```json
+  {
+    "minFileSizeBytes": 1024,
+    "excludePatterns": [...],
+    "profiles": [...]
+  }
+  ```
 
 ### 4. Compress
 
@@ -902,16 +986,35 @@ To keep maintenance footprint small, the following are explicitly out of scope:
 
 ---
 
+## Community Profiles Directory
+
+A `profiles/` directory in the repo root serves as a community resource for
+curated profile configurations. Ships with two official profiles:
+
+```
+profiles/
+├── default.json   # conservative BC3 defaults — safe for all hardware
+└── quality.json   # BC7 for diffuse — better quality, slower on Linux CPU
+```
+
+Users drop these into `~/.config/atak/profiles.json` to switch configurations.
+Community members can contribute profiles for specific mod packs as PRs —
+low barrier to contribution, high value for the ecosystem.
+
+`quality.json` is identical to `default.json` except Diffuse/Color uses
+`BC7_UNORM` instead of `BC3_UNORM`. Power users on Windows with discrete
+GPUs (where BC7 is GPU-accelerated) will prefer this.
+
+---
+
 ## Future / Post-1.0
 
 - **Atomic compression** — compress to staging directory, verify all files
   succeeded, then diff-apply in one pass. Failed jobs leave the mod directory
   untouched. Planned for v1.1.
 - **Scan metadata persistence** — store scan results and compression history
-  to disk. Enables: "already done" tracking, restore by profile, incremental
-  rescans. Requires a simple local database or JSON state file.
-- **Restore by profile** — restore only mods containing textures that match
-  a given profile. Dependent on scan metadata persistence.
+  to disk. Enables: "already done" tracking, incremental rescans. Requires a
+  simple local database or JSON state file.
 - **stalker-update** — separate binary, same visual identity, handles GAMMA
   mod updates selectively. Dependent on community reception of atak.
 

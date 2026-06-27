@@ -30,7 +30,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	_, _, profilesCreated, err := config.LoadProfiles()
+	_, _, _, profilesCreated, err := config.LoadProfiles()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "atak: failed to load profiles: %v\n", err)
 		os.Exit(1)
