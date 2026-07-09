@@ -160,6 +160,14 @@ func (m ResultsModel) buildJobs(scope int, selectedProfile, selectedMod string) 
 			}
 			return true // default to mips on
 		}
+		maxTextureSizeFor := func(name string) int {
+			for _, p := range profiles {
+				if p.Name == name {
+					return p.MaxTextureSize
+				}
+			}
+			return 0
+		}
 
 		var filtered []AssetGroup
 		switch scope {
@@ -197,11 +205,12 @@ func (m ResultsModel) buildJobs(scope int, selectedProfile, selectedMod string) 
 				paths = append(paths, a.Path)
 			}
 			configured = append(configured, ConfiguredGroup{
-				ProfileName:  g.ProfileName,
-				Format:       g.SuggestedFmt,
-				GenerateMips: mipsFor(g.ProfileName),
-				Paths:        paths,
-				OutputDir:    "",
+				ProfileName:    g.ProfileName,
+				Format:         g.SuggestedFmt,
+				GenerateMips:   mipsFor(g.ProfileName),
+				MaxTextureSize: maxTextureSizeFor(g.ProfileName),
+				Paths:          paths,
+				OutputDir:      "",
 			})
 		}
 		return NavigateMsg{

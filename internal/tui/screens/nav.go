@@ -56,11 +56,12 @@ type CompressJobData struct {
 
 // ConfiguredGroup is a profile group with user-confirmed settings.
 type ConfiguredGroup struct {
-	ProfileName  string
-	Format       string
-	GenerateMips bool
-	Paths        []string
-	OutputDir    string // empty means in-place (filepath.Dir of each asset)
+	ProfileName     string
+	Format          string
+	GenerateMips    bool
+	MaxTextureSize  int
+	Paths           []string
+	OutputDir       string // empty means in-place (filepath.Dir of each asset)
 }
 
 // SummaryData is passed from Compress → Summary.

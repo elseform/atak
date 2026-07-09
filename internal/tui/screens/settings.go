@@ -134,7 +134,7 @@ func (m SettingsModel) View() string {
 		content string
 		hint    string
 	}{
-		{"GAMMA Mods Directory", fieldModsDir, m.inputs[0].View(), ""},
+		{"Anomaly Mods Directory", fieldModsDir, m.inputs[0].View(), ""},
 		{"Backup Directory", fieldBackupDir, m.inputs[1].View(), ""},
 		{"Worker Threads", fieldWorkers, m.inputs[2].View(), "Conservative default (CPU/4). Increase if compression feels slow and your system has headroom."},
 		{"Backup Compression Level", fieldBackupLevel, m.inputs[3].View(),

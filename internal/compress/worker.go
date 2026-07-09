@@ -9,10 +9,11 @@ import (
 
 // Job represents a single compression task.
 type Job struct {
-	Asset        scan.Asset
-	Format       string
-	GenerateMips bool
-	OutputDir    string // filepath.Dir(asset.Path) for in-place
+	Asset           scan.Asset
+	Format          string
+	GenerateMips    bool
+	MaxTextureSize  int
+	OutputDir       string // filepath.Dir(asset.Path) for in-place
 }
 
 // RunPool executes jobs concurrently using workerCount goroutines.
@@ -37,7 +38,7 @@ func RunPool(ctx context.Context, texconvPath string, jobs []Job, workerCount in
 					return
 				default:
 				}
-				results <- Run(ctx, texconvPath, job.Asset, job.Format, job.GenerateMips, job.OutputDir)
+				results <- Run(ctx, texconvPath, job.Asset, job.Format, job.GenerateMips, job.MaxTextureSize, job.OutputDir)
 			}
 		}()
 	}

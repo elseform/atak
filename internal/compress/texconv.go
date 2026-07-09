@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/noisethanks/atak/internal/scan"
@@ -27,7 +28,7 @@ type CompressionResult struct {
 // Run invokes texconv on a single asset and returns the result.
 // If format is BC7_UNORM and texconv exits non-zero, automatically retries with BC3_UNORM.
 // outputDir should be filepath.Dir(asset.Path) for in-place compression.
-func Run(ctx context.Context, texconvPath string, asset scan.Asset, format string, generateMips bool, outputDir string) CompressionResult {
+func Run(ctx context.Context, texconvPath string, asset scan.Asset, format string, generateMips bool, maxTextureSize int, outputDir string) CompressionResult {
 	before, _ := fileSize(asset.Path)
 
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
@@ -35,12 +36,12 @@ func Run(ctx context.Context, texconvPath string, asset scan.Asset, format strin
 	}
 
 	actualFormat := format
-	success, stderr, runErr, after := runOnce(ctx, texconvPath, asset.Path, format, outputDir)
+	success, stderr, runErr, after := runOnce(ctx, texconvPath, asset.Path, format, maxTextureSize, outputDir)
 
 	// BC7 fallback — only if ctx is still live (not a cancellation failure).
 	if !success && format == "BC7_UNORM" && ctx.Err() == nil {
 		actualFormat = "BC3_UNORM"
-		success, stderr, runErr, after = runOnce(ctx, texconvPath, asset.Path, "BC3_UNORM", outputDir)
+		success, stderr, runErr, after = runOnce(ctx, texconvPath, asset.Path, "BC3_UNORM", maxTextureSize, outputDir)
 	}
 
 	if ctx.Err() != nil {
@@ -76,7 +77,7 @@ func Run(ctx context.Context, texconvPath string, asset scan.Asset, format strin
 }
 
 // runOnce executes a single texconv invocation and reports the outcome.
-func runOnce(ctx context.Context, texconvPath, inputPath, format, outputDir string) (success bool, stderr string, err error, after int64) {
+func runOnce(ctx context.Context, texconvPath, inputPath, format string, maxTextureSize int, outputDir string) (success bool, stderr string, err error, after int64) {
 	args := []string{
 		"-f", format,
 		"-m", "0",       // full mip chain
@@ -86,9 +87,12 @@ func runOnce(ctx context.Context, texconvPath, inputPath, format, outputDir stri
 		"-y",            // overwrite
 		"-nologo",       // suppress header
 		"-o", outputDir,
-		"--",
-		inputPath,
 	}
+	if maxTextureSize > 0 {
+		n := strconv.Itoa(maxTextureSize)
+		args = append(args, "-w", n, "-h", n)
+	}
+	args = append(args, "--", inputPath)
 
 	cmd := exec.Command(texconvPath, args...)
 	tools.SetProcAttr(cmd)

@@ -62,7 +62,7 @@ func (m MenuModel) Update(msg tea.Msg) (MenuModel, tea.Cmd) {
 func (m MenuModel) View() string {
 	var b strings.Builder
 	b.WriteString(style.StyleTitle.Render("atak") + "\n")
-	b.WriteString(style.StyleSubtitle.Render("GAMMA texture compressor & backup tool") + "\n\n")
+	b.WriteString(style.StyleSubtitle.Render("S.T.A.L.K.E.R. Anomaly texture compressor & backup tool") + "\n\n")
 
 	if m.statusMsg != "" {
 		b.WriteString(style.StyleMuted.Render(m.statusMsg) + "\n\n")

@@ -165,10 +165,11 @@ func buildJobs(data CompressJobData) []compress.Job {
 	for _, g := range data.Groups {
 		for _, path := range g.Paths {
 			jobs = append(jobs, compress.Job{
-				Asset:        scan.Asset{Path: path},
-				Format:       g.Format,
-				GenerateMips: g.GenerateMips,
-				OutputDir:    filepath.Dir(path),
+				Asset:          scan.Asset{Path: path},
+				Format:         g.Format,
+				GenerateMips:   g.GenerateMips,
+				MaxTextureSize: g.MaxTextureSize,
+				OutputDir:      filepath.Dir(path),
 			})
 		}
 	}

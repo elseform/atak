@@ -14,11 +14,12 @@ var defaultProfilesJSON []byte
 
 // Profile defines a texture compression target matched by filename pattern.
 type Profile struct {
-	Name         string   `json:"name"`
-	Format       string   `json:"format"`
-	Patterns     []string `json:"patterns"`
-	Exclude      []string `json:"exclude,omitempty"`
-	GenerateMips bool     `json:"generateMips,omitempty"`
+	Name            string   `json:"name"`
+	Format          string   `json:"format"`
+	Patterns        []string `json:"patterns"`
+	Exclude         []string `json:"exclude,omitempty"`
+	GenerateMips    bool     `json:"generateMips,omitempty"`
+	MaxTextureSize  int      `json:"maxTextureSize,omitempty"`
 }
 
 type profileFile struct {
@@ -147,6 +148,10 @@ func detectModsDir() string {
 	var candidates []string
 	if runtime.GOOS == "windows" {
 		candidates = []string{
+			`C:\Games\Anomaly\mods`,
+			`D:\Games\Anomaly\mods`,
+			`D:\Anomaly\mods`,
+			`C:\Anomaly\mods`,
 			`C:\Games\GAMMA\mods`,
 			`D:\Games\GAMMA\mods`,
 			`D:\GAMMA\mods`,
@@ -158,6 +163,8 @@ func detectModsDir() string {
 	} else {
 		home, _ := os.UserHomeDir()
 		candidates = []string{
+			filepath.Join(home, "Games", "Anomaly", "mods"),
+			filepath.Join(home, "Anomaly", "mods"),
 			filepath.Join(home, "Games", "GAMMA", "mods"),
 			filepath.Join(home, "GAMMA", "mods"),
 		}

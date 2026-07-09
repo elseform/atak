@@ -22,7 +22,7 @@ type WelcomeModel struct {
 
 func NewWelcome(cfg *config.Config) WelcomeModel {
 	mods := textinput.New()
-	mods.Placeholder = "/home/user/Games/GAMMA/mods"
+	mods.Placeholder = "/home/user/Games/Anomaly/mods"
 	mods.SetValue(cfg.ModsDir)
 	mods.Focus()
 	mods.Width = 60
@@ -104,10 +104,10 @@ func (m WelcomeModel) Update(msg tea.Msg) (WelcomeModel, tea.Cmd) {
 func (m WelcomeModel) View() string {
 	var b strings.Builder
 	b.WriteString(style.StyleTitle.Render("atak") + "\n")
-	b.WriteString(style.StyleSubtitle.Render("GAMMA texture compressor & backup tool") + "\n\n")
+	b.WriteString(style.StyleSubtitle.Render("S.T.A.L.K.E.R. Anomaly texture compressor & backup tool") + "\n\n")
 	b.WriteString(style.StyleBody.Render("Welcome! Let's set up your paths before we begin.") + "\n\n")
 
-	b.WriteString(style.StyleSelected.Render("GAMMA Mods Directory") + "\n")
+	b.WriteString(style.StyleSelected.Render("Anomaly Mods Directory") + "\n")
 	b.WriteString(m.modsInput.View() + "\n\n")
 
 	b.WriteString(style.StyleSelected.Render("Backup Directory") + "\n")

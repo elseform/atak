@@ -421,7 +421,7 @@ func (m AboutModel) View() string {
 	var b strings.Builder
 	b.WriteString(style.StyleTitle.Render("atak "+m.version) + "\n\n")
 	b.WriteString(style.StyleBody.Render("A texture compression and backup utility for") + "\n")
-	b.WriteString(style.StyleBody.Render("STALKER GAMMA modlists.") + "\n\n")
+	b.WriteString(style.StyleBody.Render("S.T.A.L.K.E.R. Anomaly modlists.") + "\n\n")
 	b.WriteString(style.StyleMuted.Render("github.com/noisethanks/atak") + "\n\n\n")
 
 	visible := m.visibleLines()

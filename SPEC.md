@@ -3,9 +3,9 @@
 ## What This Is
 
 A single compiled Go binary that wraps 7-zip and texconv with a Bubble Tea TUI.
-It helps STALKER GAMMA players back up their mod directory and compress textures
+It helps S.T.A.L.K.E.R. Anomaly players back up their mod directory and compress textures
 to reduce VRAM usage. The target user is non-technical — someone who followed a
-YouTube guide to install GAMMA and wants better performance without breaking anything.
+YouTube guide to install an Anomaly-based modpack and wants better performance without breaking anything.
 
 **This is not a platform. It is a focused utility with a small, permanent feature set.**
 
@@ -168,6 +168,16 @@ overwrites it on subsequent launches.
   - `*_bump.*` — matches any file with `_bump` before the extension
   - `*/textures/sky/*` — matches any file under a `textures/sky/` directory
   - `*_d.*` — matches files ending in `_d` before the extension
+- `maxTextureSize` — optional integer, default 0 (no limit). When set, texconv
+  will downsample the texture to this maximum dimension before compression.
+  A 4096x4096 texture with `maxTextureSize: 1024` becomes 1024x1024.
+  Textures smaller than this value are not upscaled.
+  Passed to texconv as `-w <n> -h <n>`.
+  Recommended use: set on Sky, Terrain, Detail profiles for 4GB VRAM cards.
+  Leave at 0 for Weapon and Character textures — players view these up close.
+  ```json
+  "maxTextureSize": 1024
+  ```
 - `exclude` — optional array of glob patterns. Files matching the profile's
   `patterns` but also matching `exclude` are skipped. Use for exceptions
   within a broad pattern.
@@ -535,8 +545,8 @@ All archive operations live in one screen. No separate Restore screen.
   functionality lives in `backup.go`. The `ModPicker` component is reused.
 - Main menu has four items: Scan & Compress, Backup Manager, Settings, About
 
-- List existing backups in the GAMMA directory archive with size and date
-- Create a new LZMA solid archive of the full GAMMA mods directory via:
+- List existing backups in the Anomaly mods directory archive with size and date
+- Create a new LZMA solid archive of the full Anomaly mods directory via:
   ```
   7zz a -t7z -m0=lzma2 -mx=6 -mfb=64 -md=32m -ms=on -bsp1 <output.7z> <mods_dir> -xr!downloads -xr!Downloads
   ```
@@ -600,7 +610,7 @@ Both modes:
 
 **If it's not explicitly in a profile, don't compress it.**
 
-The tool never blindly compresses unrecognized textures. Texture formats in GAMMA
+The tool never blindly compresses unrecognized textures. Texture formats in Anomaly
 mods are highly inconsistent across mod authors — engine-specific textures, unusual
 formats, and edge cases are common. Auto-compressing unknown textures risks game
 crashes and visual corruption.
@@ -652,7 +662,7 @@ Matched against the filename (basename) before any profile matching. If a file
 matches `excludePatterns`, it is skipped and counted as "Excluded".
 
 The embedded default `profiles.json` ships with conservative `excludePatterns`
-covering known engine-specific texture naming conventions in GAMMA.
+covering known engine-specific texture naming conventions in Anomaly.
 
 **Counters on scan results screen:**
 - `___ to compress` — total files matched by profiles (excluding excluded files)
@@ -677,7 +687,7 @@ Default value shipped in config:
 ```
 
 - `.*` — skips all hidden directories (e.g. `.Grok's Modpack Installer`, `.git`)
-- `downloads` / `Downloads` — skips the GAMMA downloads folder (both cases for Linux)
+- `downloads` / `Downloads` — skips the Anomaly/GAMMA downloads folder (both cases for Linux)
 - `G.A.M.M.A. UI` — skips the GAMMA UI mod directory. Compressing main menu assets
   causes excessive loading times — confirmed by community testing
 
@@ -741,7 +751,7 @@ remains — it is still needed to show the OperationScreen during compression.
 - Worker pool: `max(1, runtime.NumCPU()/2)` concurrent texconv processes
 - Per-file texconv invocation:
   ```
-  texconv -f <FORMAT> -m 0 -if CUBIC -bc x -gpu 0 -y -nologo -o <output_dir> -- <input_file>
+  texconv -f <FORMAT> -m 0 -if CUBIC -bc x -gpu 0 -y -nologo     [-w <maxTextureSize> -h <maxTextureSize>]     -o <output_dir> -- <input_file>
   ```
   Note: `--` separator is required before input path — paths starting with `/`
   are interpreted as flags without it.
@@ -751,6 +761,8 @@ remains — it is still needed to show the OperationScreen during compression.
   `-bc x` quick BCn encoding (major BC7 speedup)
   `-gpu 0` GPU accelerated compression (falls back to CPU on Linux)
   `-nologo` suppress Microsoft header output
+  `-w <n> -h <n>` only added when profile `maxTextureSize > 0` — caps output
+  dimensions. texconv will not upscale if input is smaller than the limit.
 
 - **BC7 → BC3 automatic fallback:** If texconv exits non-zero with BC7_UNORM,
   automatically retry with BC3_UNORM. Matches proven bash script behavior.
@@ -875,8 +887,8 @@ the Go process exits unexpectedly.
 
 ### 5. Settings
 
-- GAMMA mods directory path — auto-detect from common locations:
-  - Linux: `~/Games/GAMMA/mods`, `~/GAMMA/mods`, `$MO2_GAME_PATH`
+- Anomaly mods directory path — auto-detect from common locations:
+  - Linux: `~/Games/Anomaly/mods`, `~/Anomaly/mods`, `$MO2_GAME_PATH`
   - Windows: `C:\Games\GAMMA\mods`, `D:\GAMMA\mods`, `%MO2_GAME_PATH%`
   - All path handling via `filepath.Join` — no hardcoded separators anywhere
 - Backup archive path
@@ -906,8 +918,8 @@ the Go process exits unexpectedly.
 Full config.json schema:
 ```json
 {
-  "modsDir": "/home/user/GAMMA/mods",
-  "backupDir": "/home/user/GAMMA/backup",
+  "modsDir": "/home/user/Anomaly/mods",
+  "backupDir": "/home/user/Anomaly/backup",
   "workerCount": 4,
   "backupLevel": 6,
   "scanExclusions": [".*", "downloads", "Downloads"]
@@ -997,7 +1009,7 @@ Accessible from the main menu. Displays:
 │  atak v<version>                             │
 │                                                     │
 │  A texture compression and backup utility for       │
-│  STALKER GAMMA modlists.                            │
+│  S.T.A.L.K.E.R. Anomaly modlists.                            │
 │                                                     │
 │  github.com/noisethanks/atak                 │
 │                                                     │
@@ -1060,6 +1072,10 @@ low barrier to contribution, high value for the ecosystem.
 Recommended for: Windows users with discrete GPUs (BC7 is GPU-accelerated on Windows).
 Not recommended for: Linux users doing large compression jobs (BC7 is CPU-only on Linux).
 
+A future `lowvram.json` profile preset could set `maxTextureSize: 1024` on Sky,
+Terrain, and Detail profiles for users with 4GB VRAM cards who need maximum
+VRAM reduction beyond what BCn compression alone provides.
+
 ---
 
 ## Future / Post-1.0
@@ -1070,8 +1086,7 @@ Not recommended for: Linux users doing large compression jobs (BC7 is CPU-only o
 - **Scan metadata persistence** — store scan results and compression history
   to disk. Enables: "already done" tracking, incremental rescans. Requires a
   simple local database or JSON state file.
-- **stalker-update** — separate binary, same visual identity, handles GAMMA
-  mod updates selectively. Dependent on community reception of atak.
+- **stalker-update** — separate binary, same visual identity, handles Anomaly modpack updates selectively. Dependent on community reception of atak.
 
 ---
 
