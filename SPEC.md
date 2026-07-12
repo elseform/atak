@@ -168,13 +168,30 @@ overwrites it on subsequent launches.
   - `*_bump.*` — matches any file with `_bump` before the extension
   - `*/textures/sky/*` — matches any file under a `textures/sky/` directory
   - `*_d.*` — matches files ending in `_d` before the extension
-- `maxTextureSize` — optional integer, default 0 (no limit). When set, texconv
-  will downsample the texture to this maximum dimension before compression.
-  A 4096x4096 texture with `maxTextureSize: 1024` becomes 1024x1024.
-  Textures smaller than this value are not upscaled.
-  Passed to texconv as `-w <n> -h <n>`.
+- `maxTextureSize` — optional integer, default 0 (no limit). When set, caps
+  the output texture's maximum dimension while preserving aspect ratio.
+  Only applied when at least one dimension exceeds the limit — textures
+  smaller than maxTextureSize are never upscaled.
+
+  Implementation notes:
+  - texconv's `-w -h` set exact dimensions — passing both forces a square
+    output, distorting non-square textures. Pass only `-w` — texconv scales
+    height proportionally to maintain aspect ratio.
+  - Guard against upscaling: only add `-w` when at least one dimension exceeds
+    maxTextureSize (`||` not `&&`)
+
+  ```go
+  // correct implementation
+  if maxTextureSize > 0 && (asset.Width > maxTextureSize || asset.Height > maxTextureSize) {
+      args = append(args, "-w", strconv.Itoa(maxTextureSize))
+      // do NOT pass -h — texconv maintains aspect ratio from -w alone
+  }
+  ```
+
   Recommended use: set on Sky, Terrain, Detail profiles for 4GB VRAM cards.
-  Leave at 0 for Weapon and Character textures — players view these up close.
+  Do NOT use on Weapon or Character textures — quality loss is visible up close.
+  Do NOT use on cubemap/LOD textures (`*#small*`, `*cube#*`) — texconv handles
+  these incorrectly with resize flags, producing files 30x larger than the input.
   ```json
   "maxTextureSize": 1024
   ```
@@ -218,7 +235,10 @@ with broadly correct STALKER conventions but users are expected to tune it:
     "fx_sun*", "fx_*",
     "*_lm.*", "*_cm.*", "*_nm2.*",
     "*detail_map*", "*_hm.*",
-    "lut_*"
+    "lut_*",
+    "*#small*",
+    "*cube#*",
+    "*_cube#*"
   ],
   "profiles": [
     {
@@ -288,13 +308,25 @@ with broadly correct STALKER conventions but users are expected to tune it:
       "patterns": ["*/textures/detail/*", "*/textures/terrain/*"]
     },
     {
+      "name": "Sights / Reticles",
+      "format": "BC3_UNORM",
+      "generateMips": false,
+      "patterns": [
+        "*/textures/wpn/scope_reticles/*",
+        "*/textures/bonus_sights/*",
+        "*crosshair*",
+        "*reticle*",
+        "*_reticle.*",
+        "*_crosshair.*"
+      ]
+    },
+    {
       "name": "Weapon Textures",
       "format": "BC3_UNORM",
       "generateMips": true,
       "patterns": [
         "*/textures/wpn/*",
         "*/textures/rwap/*",
-        "*/textures/bonus_sights/*",
         "wpn_crosshair*"
       ]
     },
@@ -767,6 +799,8 @@ remains — it is still needed to show the OperationScreen during compression.
 - **BC7 → BC3 automatic fallback:** If texconv exits non-zero with BC7_UNORM,
   automatically retry with BC3_UNORM. Matches proven bash script behavior.
   CompressionResult records the actual format used after fallback.
+
+
 
 - **Extension case preservation:** texconv lowercases the output extension by
   default — `texture.DDS` becomes `texture.dds`. On Linux (case-sensitive

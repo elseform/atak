@@ -5,7 +5,8 @@
     "fx_sun*", "fx_*",
     "*_lm.*", "*_cm.*", "*_nm2.*",
     "*detail_map*", "*_hm.*",
-    "lut_*"
+    "lut_*",
+    "*#small*", "*cube#*", "*_cube#*"
   ],
   "profiles": [
     {
@@ -84,10 +85,16 @@
       "patterns": ["*/textures/detail/*", "*/textures/terrain/*"]
     },
     {
+      "name": "Sights / Reticles",
+      "format": "BC3_UNORM",
+      "generateMips": false,
+      "patterns": ["*/textures/wpn/scope_reticles/*", "*/textures/bonus_sights/*", "*crosshair*", "*reticle*", "*_reticle.*", "*_crosshair.*"]
+    },
+    {
       "name": "Weapon Textures",
       "format": "BC7_UNORM",
       "generateMips": true,
-      "patterns": ["*/textures/wpn/*", "*/textures/rwap/*", "*/textures/bonus_sights/*", "wpn_crosshair*"]
+      "patterns": ["*/textures/wpn/*", "*/textures/rwap/*"]
     },
     {
       "name": "Character / Hands",

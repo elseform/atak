@@ -35,13 +35,20 @@ func Run(ctx context.Context, texconvPath string, asset scan.Asset, format strin
 		return CompressionResult{Asset: asset, Success: false, Err: err}
 	}
 
+	// texconv -w/-h are exact, not maximums — small textures would be upscaled.
+	// Apply when either dimension exceeds the limit; -w alone preserves aspect ratio.
+	effectiveMaxSize := 0
+	if maxTextureSize > 0 && (asset.Width > maxTextureSize || asset.Height > maxTextureSize) {
+		effectiveMaxSize = maxTextureSize
+	}
+
 	actualFormat := format
-	success, stderr, runErr, after := runOnce(ctx, texconvPath, asset.Path, format, maxTextureSize, outputDir)
+	success, stderr, runErr, after := runOnce(ctx, texconvPath, asset.Path, format, effectiveMaxSize, outputDir)
 
 	// BC7 fallback — only if ctx is still live (not a cancellation failure).
 	if !success && format == "BC7_UNORM" && ctx.Err() == nil {
 		actualFormat = "BC3_UNORM"
-		success, stderr, runErr, after = runOnce(ctx, texconvPath, asset.Path, "BC3_UNORM", maxTextureSize, outputDir)
+		success, stderr, runErr, after = runOnce(ctx, texconvPath, asset.Path, "BC3_UNORM", effectiveMaxSize, outputDir)
 	}
 
 	if ctx.Err() != nil {
@@ -89,8 +96,7 @@ func runOnce(ctx context.Context, texconvPath, inputPath, format string, maxText
 		"-o", outputDir,
 	}
 	if maxTextureSize > 0 {
-		n := strconv.Itoa(maxTextureSize)
-		args = append(args, "-w", n, "-h", n)
+		args = append(args, "-w", strconv.Itoa(maxTextureSize))
 	}
 	args = append(args, "--", inputPath)
 
