@@ -410,8 +410,11 @@ atak/
 │   ├── config/
 │   │   └── config.go        # load/save user config and profiles
 │   ├── scan/
-│   │   ├── walker.go        # walk mod directory, enumerate assets
+│   │   ├── walker.go        # walk mod directory or virtual FS, enumerate assets
 │   │   └── dds.go           # parse DDS headers, classify format
+│   ├── modlist/
+│   │   ├── parser.go        # parseModList() — reads MO2 modlist.txt
+│   │   └── virtual.go       # buildVirtualFS() — assembles virtual filesystem map
 │   ├── compress/
 │   │   ├── texconv.go       # exec.Command wrapper, arg builder
 │   │   └── worker.go        # goroutine pool, N concurrent jobs
@@ -580,14 +583,15 @@ All archive operations live in one screen. No separate Restore screen.
 - List existing backups in the Anomaly mods directory archive with size and date
 - Create a new LZMA solid archive of the full Anomaly mods directory via:
   ```
-  7zz a -t7z -m0=lzma2 -mx=6 -mfb=64 -md=32m -ms=on -bsp1 <output.7z> <mods_dir> -xr!downloads -xr!Downloads
+  7zz a -t7z -m0=lzma2 -mx=6 -mfb=64 -md=32m -ms=on -mmt=<backupThreads> -bsp1 <output.7z> <mods_dir> -xr!downloads -xr!Downloads
   ```
   - `-mx=6` — balanced compression, reasonable RAM usage
   - `-mfb=64` — 64 fast bytes, well suited for binary/texture data
   - `-md=32m` — 32MB dictionary, keeps RAM usage sane on large mod lists
   - `-ms=on` — auto solid block sizing, let 7z decide
+  - `-mmt=<n>` — thread count from `cfg.BackupThreads`, default `max(2, NumCPU/2)`
   - `-xr!downloads`, `-xr!Downloads` — always exclude downloads folder, both cases for Linux case-sensitivity
-  - Compression level (`-mx`) is the only user-exposed knob (see Settings)
+  - Compression level (`-mx`) and thread count (`-mmt`) are user-exposed (see Settings)
 - Parse 7zz `-bsp1` stderr progress into a Bubble Tea progress bar
 - Delete old backups with confirmation
 - Verify archive integrity via `7zz t`
@@ -937,12 +941,17 @@ the Go process exits unexpectedly.
     ```
   - Validated on input — reject values outside 1-9, non-numeric input reverts to previous value
   - All other 7z flags (`-mfb=64 -md=32m -ms=on -xr!downloads -xr!Downloads`) are hardcoded, not user-exposed
-- Worker thread count for texture compression (default: `max(1, runtime.NumCPU()/4)`)
-  - Intentionally conservative — each worker is a full texconv process, N workers
-    = N cores pegged. Users can increase if their system handles it.
-  - On a 16-thread CPU: default 4 workers. On 8-thread: default 2 workers.
-  - Settings screen should note: "Increase if compression feels slow, decrease
-    if your system becomes unresponsive"
+- **Compression workers** (`workerCount`) — concurrent texconv processes.
+  Default: `max(1, runtime.NumCPU()/4)`. Each worker pegs one CPU core.
+  This setting applies to texconv only, not 7-Zip.
+  Settings screen label: "Compression workers (texconv)"
+
+- **Backup threads** (`backupThreads`) — 7-Zip internal thread count via `-mmt`.
+  Default: `max(2, runtime.NumCPU()/2)`. 7-Zip is I/O-bound and benefits from
+  more threads than texconv. Without this setting, 7-Zip uses all available
+  threads by default which can cause high CPU during backups.
+  Settings screen label: "Backup threads (7-Zip)"
+  Passed to 7-Zip as `-mmt=<n>` in all archive operations (backup, restore, verify).
 - Compression is always in-place — no staging directory option
   - The backup system is the safety net; restore from backup if needed
   - Removes user confusion and config complexity
@@ -954,14 +963,19 @@ Full config.json schema:
 {
   "modsDir": "/home/user/Anomaly/mods",
   "backupDir": "/home/user/Anomaly/backup",
-  "workerCount": 4,
+  "workerCount": 1,
+  "backupThreads": 4,
   "backupLevel": 6,
-  "scanExclusions": [".*", "downloads", "Downloads"]
+  "scanExclusions": [".*", "downloads", "Downloads", "G.A.M.M.A. UI"],
+  "modOutputMode": false,
+  "modOutputName": "ATAK",
+  "modlistPath": ""
 }
 ```
 
-Compression is always in-place. No staging directory. The backup system is the
-safety net — users restore from backup if compression results are unsatisfactory.
+Default compression is in-place. The backup system is the safety net.
+When `modOutputMode` is true and `modlistPath` is set, ATAK uses the
+virtual filesystem approach — see Mod Output Mode section.
 
 ---
 
@@ -1080,6 +1094,173 @@ To keep maintenance footprint small, the following are explicitly out of scope:
 - Support for archive formats other than 7z
 - Texture formats other than DDS input / BCn output
 - MO2 integration beyond reading the mods directory path
+
+---
+
+## Mod Output Mode (v0.2.0)
+
+An optional non-destructive compression mode that outputs compressed textures
+to a single flat mod folder compatible with MO2, rather than compressing in-place.
+
+### Overview
+
+When a MO2 `modlist.txt` is provided, ATAK builds a virtual filesystem representing
+the final merged modlist — the same view MO2 presents to the game. Only the winning
+file for each texture path is compressed. Output goes to a single flat mod folder
+(`ATAK/` by default) that the user adds as the highest-priority mod in MO2.
+
+```
+Before:                          After (MO2 load order):
+mods/                            mods/
+├── 001- Mod A/                  ├── 001- Mod A/          ← originals untouched
+│   └── gamedata/tex/ak74.dds   ├── 002- Mod B/          ← originals untouched
+├── 002- Mod B/                  └── ATAK/               ← add as highest priority
+│   └── gamedata/tex/ak74.dds       └── gamedata/
+└── ATAK/  ← new                         └── tex/
+    └── gamedata/                             └── ak74.dds ← compressed winner
+        └── tex/
+            └── ak74.dds  (002- Mod B wins)
+```
+
+### Configuration
+
+New fields in `config.json`:
+
+```json
+{
+  "modOutputMode": false,
+  "modOutputName": "ATAK",
+  "modlistPath": "/path/to/MO2/profiles/Default/modlist.txt"
+}
+```
+
+- `modOutputMode` — enable/disable. Default false (in-place mode)
+- `modOutputName` — name of the output mod folder. Default "ATAK".
+  Created as `<modsDir>/<modOutputName>/`
+- `modlistPath` — path to MO2 `modlist.txt`. Optional — if not set,
+  Mod Output Mode falls back to in-place behavior
+
+### modlist.txt parsing
+
+MO2's modlist.txt format:
+```
++High Priority Mod
++Medium Priority Mod  
+-Disabled Mod
++Low Priority Mod
+```
+
+- `+` prefix = enabled
+- `-` prefix = disabled
+- Order = priority (last line = highest priority in MO2)
+
+Parsing:
+1. Read file, split on newlines, trim whitespace
+2. Filter to lines starting with `+`
+3. Strip `+` prefix to get mod names
+4. Reverse order — modlist.txt lists low priority first, ATAK needs high priority first
+5. Return `[]string` of enabled mod names in priority order (high → low)
+
+### Virtual filesystem
+
+```go
+func buildVirtualFS(modsDir string, modList []string) map[string]string {
+    // map[relPath]absoluteSourcePath
+    // iterate low→high priority, higher priority overwrites
+    virtual := map[string]string{}
+    for i := len(modList)-1; i >= 0; i-- {
+        modPath := filepath.Join(modsDir, modList[i])
+        filepath.WalkDir(modPath, func(path string, d fs.DirEntry, err error) error {
+            if !d.IsDir() {
+                rel, _ := filepath.Rel(modPath, path)
+                virtual[rel] = path
+            }
+            return nil
+        })
+    }
+    return virtual
+}
+```
+
+Result: flat map of `relPath → winning source file`. Passed to the scanner
+instead of walking the mods directory directly.
+
+### Output structure
+
+Compressed files are written to `<modsDir>/<modOutputName>/gamedata/...`:
+
+```
+mods/ATAK/
+└── gamedata/
+    └── textures/
+        └── wpn/
+            └── ak74_d.dds  ← compressed version of whichever mod won
+```
+
+Standard flat MO2 mod structure. User adds `modsDir/ATAK/` as a mod in MO2
+and places it at the top of the load order.
+
+### Scanner behavior in Mod Output Mode
+
+- The output folder (`ATAK/` or custom name) is automatically added to
+  `scanExclusions` — never scanned, never compressed
+- Scan operates on the virtual filesystem, not the raw mods directory
+- File counts reflect unique files (duplicates across mods deduplicated)
+- Already-compressed files in the virtual filesystem are skipped as normal
+
+### Incremental runs
+
+On subsequent runs, ATAK checks if the output file already exists in the
+output folder before compressing. If it exists, the file is skipped.
+
+This allows incremental updates — add new mods, rerun, only new files
+are compressed. Existing compressed files in the output folder are untouched.
+
+**User communication — incremental skips must be surfaced clearly:**
+
+The scan results and execution screens show a separate counter:
+`X already in output folder` — distinct from `skipped (compressed)` which
+refers to already-compressed source files.
+
+If ALL files are skipped because the output folder already has everything:
+- Summary screen shows: "Nothing to compress — all files already exist
+  in output folder. Delete <outputDir> to force recompression."
+- This is displayed prominently, not buried
+
+Settings screen shows the output folder path with a hint:
+```
+Output folder: mods/ATAK/   [Delete to recompress all]
+```
+
+**To force full recompression:** delete the output folder and rerun.
+ATAK does not provide a built-in "force recompress" button — deleting
+the folder is the explicit user action.
+
+### Settings screen
+
+New fields in Settings:
+- **Mod Output Mode** toggle (on/off)
+- **Output mod name** text field (default "ATAK"), shown when toggle is on
+- **MO2 modlist.txt path** text field, shown when toggle is on
+  - "Browse" or manual path entry
+  - Shows warning if file not found
+
+### New files
+
+```
+internal/
+└── modlist/
+    ├── parser.go      # parseModList() — reads and parses modlist.txt
+    └── virtual.go     # buildVirtualFS() — assembles virtual filesystem map
+```
+
+### Fallback behavior
+
+If `modlistPath` is empty or the file cannot be read:
+- Log a warning
+- Fall back to scanning the raw mods directory (current behavior)
+- Mod Output Mode still writes to the output folder, but may include
+  duplicate files (one per mod that has them)
 
 ---
 

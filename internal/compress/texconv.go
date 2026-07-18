@@ -16,13 +16,15 @@ import (
 
 // CompressionResult holds the outcome of a single texconv invocation.
 type CompressionResult struct {
-	Asset        scan.Asset
-	ActualFormat string // format actually used; may differ from requested if BC3_UNORM fallback was triggered
-	Success      bool
-	Err          error
-	Stderr       string
-	Before       int64
-	After        int64
+	Asset         scan.Asset
+	ActualFormat  string // format actually used; may differ from requested if BC3_UNORM fallback was triggered
+	Success       bool
+	Skipped       bool // true when source file is already compressed (pre-job filter)
+	OutputSkipped bool // true when output file already exists in mod output dir (incremental skip)
+	Err           error
+	Stderr        string
+	Before        int64
+	After         int64
 }
 
 // Run invokes texconv on a single asset and returns the result.
@@ -68,10 +70,14 @@ func Run(ctx context.Context, texconvPath string, asset scan.Asset, format strin
 	}
 	// texconv always lowercases output extension; on Linux case-sensitive fs this
 	// creates a new file, leaving the original untouched. Rename to match original.
-	ext := filepath.Ext(asset.Path)
-	texconvOut := filepath.Join(outputDir, strings.TrimSuffix(filepath.Base(asset.Path), ext)+".dds")
-	if !strings.EqualFold(texconvOut, asset.Path) || texconvOut != asset.Path {
-		os.Rename(texconvOut, asset.Path)
+	// Only applies in-place — in mod output mode outputDir differs from the source
+	// directory, so renaming to asset.Path would overwrite the source file.
+	if filepath.Dir(asset.Path) == outputDir {
+		ext := filepath.Ext(asset.Path)
+		texconvOut := filepath.Join(outputDir, strings.TrimSuffix(filepath.Base(asset.Path), ext)+".dds")
+		if texconvOut != asset.Path {
+			os.Rename(texconvOut, asset.Path)
+		}
 	}
 	return CompressionResult{
 		Asset:        asset,

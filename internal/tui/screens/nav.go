@@ -40,36 +40,42 @@ type AssetGroup struct {
 }
 
 type assetRef struct {
-	Path         string
-	ModName      string
-	CurrentFmt   string
-	Width        int
-	Height       int
-	Compressed   bool
+	Path           string
+	ModName        string
+	CurrentFmt     string
+	Width          int
+	Height         int
+	Compressed     bool
+	VirtualRelPath string // non-empty when sourced from WalkVirtual
 }
 
 // CompressJobData is passed from CompressConfig → Compress.
 type CompressJobData struct {
 	Groups       []ConfiguredGroup
 	WorkerCount  int
+	ModsDir      string // needed to compute RelPath in mod output mode
+	ModOutputDir string // non-empty enables mod output mode (e.g. /mods/ATAK)
 }
 
 // ConfiguredGroup is a profile group with user-confirmed settings.
 type ConfiguredGroup struct {
-	ProfileName     string
-	Format          string
-	GenerateMips    bool
-	MaxTextureSize  int
-	Paths           []string
-	OutputDir       string // empty means in-place (filepath.Dir of each asset)
+	ProfileName    string
+	Format         string
+	GenerateMips   bool
+	MaxTextureSize int
+	Paths          []string
+	RelPaths       []string // parallel to Paths; non-empty element = VirtualRelPath for that asset
+	OutputDir      string   // empty means in-place (filepath.Dir of each asset)
 }
 
 // SummaryData is passed from Compress → Summary.
 type SummaryData struct {
-	Succeeded    int
-	Failed       int
-	TotalBefore  int64
-	TotalAfter   int64
-	Errors       []string
-	RetryPaths   []string
+	Succeeded     int
+	Failed        int
+	OutputSkipped int    // files skipped because they already exist in mod output dir
+	OutputDir     string // mod output dir path; non-empty when mod output mode was active
+	TotalBefore   int64
+	TotalAfter    int64
+	Errors        []string
+	RetryPaths    []string
 }

@@ -13,11 +13,12 @@ import (
 
 // OperationProgressMsg is sent via the progress channel to update operation state.
 type OperationProgressMsg struct {
-	Percent int
-	Status  string // current file or status line
-	Size    int64  // bytes written so far
-	Done    bool
-	Err     error
+	Percent       int
+	Status        string // current file or status line
+	Size          int64  // bytes written so far
+	OutputSkipped int    // running total of files skipped (already in output dir); 0 = unused
+	Done          bool
+	Err           error
 }
 
 type opTickMsg OperationProgressMsg
@@ -25,20 +26,21 @@ type opElapsedMsg struct{}
 
 // OperationScreen renders a shared progress UI for all long-running operations.
 type OperationScreen struct {
-	title     string
-	ch        <-chan OperationProgressMsg
-	cancel    func()
-	spinner   spinner.Model
-	bar       progress.Model
-	percent   float64
-	status    string
-	size      int64
-	startedAt time.Time
-	elapsed   time.Duration
-	done      bool
-	err       error
-	width     int
-	height    int
+	title         string
+	ch            <-chan OperationProgressMsg
+	cancel        func()
+	spinner       spinner.Model
+	bar           progress.Model
+	percent       float64
+	status        string
+	size          int64
+	outputSkipped int
+	startedAt     time.Time
+	elapsed       time.Duration
+	done          bool
+	err           error
+	width         int
+	height        int
 }
 
 func NewOperationScreen(title string, ch <-chan OperationProgressMsg, cancel func()) OperationScreen {
@@ -87,6 +89,9 @@ func (m OperationScreen) Update(msg tea.Msg) (OperationScreen, tea.Cmd) {
 		}
 		if msg.Size > 0 {
 			m.size = msg.Size
+		}
+		if msg.OutputSkipped > 0 {
+			m.outputSkipped = msg.OutputSkipped
 		}
 		if msg.Done {
 			m.done = true
@@ -145,6 +150,9 @@ func (m OperationScreen) View() string {
 	}
 	if m.size > 0 {
 		b.WriteString(style.StyleMuted.Render("  Size: "+opFormatBytes(m.size)) + "\n")
+	}
+	if m.outputSkipped > 0 {
+		b.WriteString(style.StyleMuted.Render(fmt.Sprintf("  %d already in output folder", m.outputSkipped)) + "\n")
 	}
 	b.WriteString(style.StyleMuted.Render(fmt.Sprintf("  Elapsed: %s", m.elapsed)) + "\n")
 	b.WriteString("\n" + style.StyleMuted.Render("  ctrl+c to cancel"))

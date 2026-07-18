@@ -50,7 +50,15 @@ func (m SummaryModel) View() string {
 	var b strings.Builder
 	b.WriteString(style.StyleTitle.Render("Done") + "\n\n")
 
+	if d.OutputSkipped > 0 && d.Succeeded == 0 {
+		b.WriteString(style.StyleWarning.Render("Nothing to compress — all files already exist in output folder.") + "\n")
+		b.WriteString(style.StyleWarning.Render(fmt.Sprintf("Delete %s to force recompression.", d.OutputDir)) + "\n\n")
+	}
+
 	b.WriteString(style.StyleSuccess.Render(fmt.Sprintf("✓  %d succeeded", d.Succeeded)) + "\n")
+	if d.OutputSkipped > 0 {
+		b.WriteString(style.StyleMuted.Render(fmt.Sprintf("⊘  %d already in output folder", d.OutputSkipped)) + "\n")
+	}
 	if d.Failed > 0 {
 		b.WriteString(style.StyleDanger.Render(fmt.Sprintf("✗  %d failed", d.Failed)) + "\n")
 	}

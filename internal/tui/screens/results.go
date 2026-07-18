@@ -2,6 +2,7 @@ package screens
 
 import (
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -14,8 +15,9 @@ import (
 
 // ScanResultData is passed from Scan → Results via NavigateMsg.
 type ScanResultData struct {
-	Assets  []scan.Asset
-	Skipped int
+	Assets       []scan.Asset
+	Skipped      int
+	ModlistError string // non-empty when mod output mode is misconfigured; blocks compression
 }
 
 // ResultsModel shows scan results grouped by compression profile.
@@ -28,6 +30,7 @@ type ResultsModel struct {
 	mods          []string
 	showModPicker bool
 	modPicker     components.ModPicker
+	modlistErr    string // non-empty blocks all compression actions
 	cfg           *config.Config
 	width         int
 	height        int
@@ -51,12 +54,13 @@ func NewResults(data ScanResultData, cfg *config.Config) ResultsModel {
 
 	for _, a := range data.Assets {
 		ref := assetRef{
-			Path:       a.Path,
-			ModName:    a.ModName,
-			CurrentFmt: a.CurrentFmt,
-			Width:      a.Width,
-			Height:     a.Height,
-			Compressed: a.Compressed,
+			Path:           a.Path,
+			ModName:        a.ModName,
+			CurrentFmt:     a.CurrentFmt,
+			Width:          a.Width,
+			Height:         a.Height,
+			Compressed:     a.Compressed,
+			VirtualRelPath: a.VirtualRelPath,
 		}
 		switch a.ProfileMatch {
 		case "Excluded":
@@ -88,12 +92,13 @@ func NewResults(data ScanResultData, cfg *config.Config) ResultsModel {
 	sort.Strings(mods)
 
 	return ResultsModel{
-		groups:    ordered,
-		unmatched: unmatched,
-		excluded:  excluded,
-		skipped:   data.Skipped,
-		mods:      mods,
-		cfg:       cfg,
+		groups:     ordered,
+		unmatched:  unmatched,
+		excluded:   excluded,
+		skipped:    data.Skipped,
+		mods:       mods,
+		modlistErr: data.ModlistError,
+		cfg:        cfg,
 	}
 }
 
@@ -119,22 +124,25 @@ func (m ResultsModel) Update(msg tea.Msg) (ResultsModel, tea.Cmd) {
 	if msg, ok := msg.(tea.KeyMsg); ok {
 		switch msg.String() {
 		case "up", "k":
-			if m.cursor > 0 {
+			if m.cursor > 0 && m.modlistErr == "" {
 				m.cursor--
 			}
 		case "down", "j":
-			if m.cursor < len(m.groups)-1 {
+			if m.cursor < len(m.groups)-1 && m.modlistErr == "" {
 				m.cursor++
 			}
 		case "enter":
-			if len(m.groups) == 0 {
+			if len(m.groups) == 0 || m.modlistErr != "" {
 				return m, nil
 			}
 			return m, m.buildJobs(1, m.groups[m.cursor].ProfileName, "")
 		case "r":
+			if m.modlistErr != "" {
+				return m, nil
+			}
 			return m, m.buildJobs(0, "", "")
 		case "m":
-			if len(m.mods) > 0 {
+			if m.modlistErr == "" && len(m.mods) > 0 {
 				m.showModPicker = true
 				m.modPicker = components.NewModPicker(m.mods, m.width-4, max(5, m.height-8))
 			}
@@ -200,9 +208,10 @@ func (m ResultsModel) buildJobs(scope int, selectedProfile, selectedMod string) 
 
 		var configured []ConfiguredGroup
 		for _, g := range filtered {
-			var paths []string
+			var paths, relPaths []string
 			for _, a := range g.Assets {
 				paths = append(paths, a.Path)
+				relPaths = append(relPaths, a.VirtualRelPath)
 			}
 			configured = append(configured, ConfiguredGroup{
 				ProfileName:    g.ProfileName,
@@ -210,16 +219,19 @@ func (m ResultsModel) buildJobs(scope int, selectedProfile, selectedMod string) 
 				GenerateMips:   mipsFor(g.ProfileName),
 				MaxTextureSize: maxTextureSizeFor(g.ProfileName),
 				Paths:          paths,
+				RelPaths:       relPaths,
 				OutputDir:      "",
 			})
 		}
-		return NavigateMsg{
-			To: NavCompress,
-			Data: CompressJobData{
-				Groups:      configured,
-				WorkerCount: cfg.WorkerCount,
-			},
+		jobData := CompressJobData{
+			Groups:      configured,
+			WorkerCount: cfg.WorkerCount,
+			ModsDir:     cfg.ModsDir,
 		}
+		if cfg.ModOutputMode && cfg.ModOutputName != "" {
+			jobData.ModOutputDir = filepath.Join(cfg.ModsDir, cfg.ModOutputName)
+		}
+		return NavigateMsg{To: NavCompress, Data: jobData}
 	}
 }
 
@@ -234,6 +246,12 @@ func (m ResultsModel) View() string {
 	var b strings.Builder
 	b.WriteString(style.StyleTitle.Render("Scan Results") + "\n\n")
 
+	if m.modlistErr != "" {
+		b.WriteString(style.StyleWarning.Render(m.modlistErr) + "\n\n")
+		b.WriteString(style.KeyHint("q", "back"))
+		return b.String()
+	}
+
 	// Counter line.
 	total := 0
 	for _, g := range m.groups {
@@ -246,6 +264,10 @@ func (m ResultsModel) View() string {
 		style.StyleMuted.Render(fmt.Sprintf("%d unmatched", len(m.unmatched))),
 		style.StyleMuted.Render(fmt.Sprintf("%d excluded", len(m.excluded))),
 	))
+
+	if m.cfg.ModOutputMode && total == 0 && m.skipped == 0 {
+		b.WriteString(style.StyleWarning.Render("⚠ Mod Output Mode is enabled but no textures were found.\n  Your modlist.txt path may be incorrect or unreadable.\n  Check Settings → MO2 modlist.txt path.") + "\n\n")
+	}
 
 	// Compressible profile groups (cursor navigates these).
 	if len(m.groups) == 0 {

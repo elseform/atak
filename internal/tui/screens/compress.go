@@ -67,7 +67,7 @@ func (m CompressModel) startCompression() tea.Cmd {
 	return func() tea.Msg {
 		jobs := buildJobs(data)
 		resultCh := compress.RunPool(ctx, texconvPath, jobs, data.WorkerCount)
-		opCh, sumCh := compressToOpCh(resultCh, total)
+		opCh, sumCh := compressToOpCh(resultCh, total, data.ModOutputDir)
 		return compressReadyMsg{opCh: opCh, sumCh: sumCh}
 	}
 }
@@ -116,20 +116,24 @@ func (m *CompressModel) SetSize(w, h int) {
 func compressToOpCh(
 	resultCh <-chan compress.CompressionResult,
 	total int,
+	modOutputDir string,
 ) (<-chan components.OperationProgressMsg, <-chan SummaryData) {
 	opCh := make(chan components.OperationProgressMsg, 32)
 	sumCh := make(chan SummaryData, 1)
 	go func() {
-		var done, succeeded, failed int
+		var done, succeeded, failed, outputSkipped int
 		var totalBefore, totalAfter int64
 		var errors []string
 		for r := range resultCh {
 			done++
 			totalBefore += r.Before
 			totalAfter += r.After
-			if r.Success {
+			switch {
+			case r.OutputSkipped:
+				outputSkipped++
+			case r.Success:
 				succeeded++
-			} else {
+			default:
 				failed++
 				errLine := fmt.Sprintf("%s: %v", filepath.Base(r.Asset.Path), r.Err)
 				if r.Stderr != "" {
@@ -142,17 +146,20 @@ func compressToOpCh(
 				saved = 0
 			}
 			opCh <- components.OperationProgressMsg{
-				Percent: done * 100 / max(1, total),
-				Status:  filepath.Base(r.Asset.Path),
-				Size:    saved,
+				Percent:       done * 100 / max(1, total),
+				Status:        filepath.Base(r.Asset.Path),
+				Size:          saved,
+				OutputSkipped: outputSkipped,
 			}
 		}
 		sumCh <- SummaryData{
-			Succeeded:   succeeded,
-			Failed:      failed,
-			TotalBefore: totalBefore,
-			TotalAfter:  totalAfter,
-			Errors:      errors,
+			Succeeded:     succeeded,
+			Failed:        failed,
+			OutputSkipped: outputSkipped,
+			OutputDir:     modOutputDir,
+			TotalBefore:   totalBefore,
+			TotalAfter:    totalAfter,
+			Errors:        errors,
 		}
 		close(opCh)
 	}()
@@ -163,14 +170,19 @@ func compressToOpCh(
 func buildJobs(data CompressJobData) []compress.Job {
 	var jobs []compress.Job
 	for _, g := range data.Groups {
-		for _, path := range g.Paths {
-			jobs = append(jobs, compress.Job{
+		for i, path := range g.Paths {
+			job := compress.Job{
 				Asset:          scan.Asset{Path: path},
 				Format:         g.Format,
 				GenerateMips:   g.GenerateMips,
 				MaxTextureSize: g.MaxTextureSize,
 				OutputDir:      filepath.Dir(path),
-			})
+			}
+			if data.ModOutputDir != "" && i < len(g.RelPaths) && g.RelPaths[i] != "" {
+				job.RelPath = g.RelPaths[i]
+				job.ModOutputDir = data.ModOutputDir
+			}
+			jobs = append(jobs, job)
 		}
 	}
 	return jobs

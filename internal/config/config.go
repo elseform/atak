@@ -35,6 +35,9 @@ type Config struct {
 	WorkerCount    int      `json:"workerCount"`
 	BackupLevel    int      `json:"backupLevel,omitempty"`
 	ScanExclusions []string `json:"scanExclusions,omitempty"`
+	ModOutputMode  bool     `json:"modOutputMode"`
+	ModOutputName  string   `json:"modOutputName"`
+	ModlistPath    string   `json:"modlistPath"`
 }
 
 func configDir() (string, error) {
@@ -73,6 +76,9 @@ func Load() (*Config, error) {
 	}
 	if cfg.BackupLevel == 0 {
 		cfg.BackupLevel = 6
+	}
+	if cfg.ModOutputName == "" {
+		cfg.ModOutputName = "ATAK"
 	}
 	return &cfg, nil
 }
@@ -141,6 +147,9 @@ func defaultConfig() *Config {
 		WorkerCount:    1,
 		BackupLevel:    6,
 		ScanExclusions: []string{".*", "downloads", "Downloads", "G.A.M.M.A. UI"},
+		ModOutputMode:  true,
+		ModOutputName:  "ATAK",
+		ModlistPath:    "",
 	}
 }
 

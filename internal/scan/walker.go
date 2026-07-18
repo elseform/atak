@@ -2,6 +2,7 @@ package scan
 
 import (
 	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -10,16 +11,17 @@ import (
 
 // Asset is a single texture file discovered during a scan.
 type Asset struct {
-	Path         string
-	ModName      string
-	CurrentFmt   string
-	Compressed   bool
-	Excluded     bool
-	Width        int
-	Height       int
-	HasAlpha     bool
-	ProfileMatch string
-	SuggestedFmt string
+	Path           string
+	ModName        string
+	CurrentFmt     string
+	Compressed     bool
+	Excluded       bool
+	Width          int
+	Height         int
+	HasAlpha       bool
+	ProfileMatch   string
+	SuggestedFmt   string
+	VirtualRelPath string // set by WalkVirtual: path relative to mod root (e.g. gamedata/textures/wpn/ak74.dds)
 }
 
 // Walk traverses modsDir, emitting Asset values for every uncompressed .dds file found.
@@ -66,6 +68,10 @@ func Walk(modsDir string, profiles []config.Profile, excludePatterns []string, e
 			}
 
 			rel, _ := filepath.Rel(modsDir, path)
+			if strings.Count(filepath.ToSlash(rel), "gamedata") > 1 {
+				skipped++
+				return nil // variant folder with double gamedata path
+			}
 			modName := modNameFromRel(rel)
 			base := strings.ToLower(filepath.Base(path))
 
@@ -112,6 +118,112 @@ func Walk(modsDir string, profiles []config.Profile, excludePatterns []string, e
 		if err != nil {
 			errs <- err
 		}
+	}()
+
+	return assets, skippedCh, errs
+}
+
+// WalkVirtual scans a pre-built virtual filesystem map (relPath→absPath) instead of
+// walking a directory. Same classification logic as Walk. exclusions are matched against
+// the source mod name (first component of absPath relative to modsDir).
+func WalkVirtual(virtualFS map[string]string, modsDir string, profiles []config.Profile, excludePatterns []string, exclusions []string, minFileSizeBytes int) (<-chan Asset, <-chan int, <-chan error) {
+	assets := make(chan Asset, 256)
+	skippedCh := make(chan int, 1)
+	errs := make(chan error, 1)
+
+	go func() {
+		defer close(errs)
+		var skipped int
+
+		for relPath, absPath := range virtualFS {
+			if strings.Count(filepath.ToSlash(relPath), "gamedata") > 1 {
+				skipped++
+				continue // variant folder with double gamedata path
+			}
+			if !strings.EqualFold(filepath.Ext(absPath), ".dds") {
+				continue
+			}
+
+			fi, err := os.Stat(absPath)
+			if err != nil {
+				continue
+			}
+			if fi.Size() < int64(minFileSizeBytes) {
+				skipped++
+				continue
+			}
+
+			// Extract mod name from source path for exclusion check.
+			relToMods, relErr := filepath.Rel(modsDir, absPath)
+			if relErr != nil {
+				continue
+			}
+			modName := modNameFromRel(relToMods)
+
+			// Exclusion check against the source mod name.
+			excluded := false
+			for _, pattern := range exclusions {
+				if matched, err := filepath.Match(pattern, modName); err == nil && matched {
+					excluded = true
+					break
+				}
+			}
+			if excluded {
+				continue
+			}
+
+			info, err := ParseDDS(absPath)
+			if err != nil {
+				continue
+			}
+			if info.Compressed {
+				skipped++
+				continue
+			}
+
+			base := strings.ToLower(filepath.Base(absPath))
+
+			// Global exclude check — runs before profile matching.
+			if matchPatterns(base, excludePatterns) {
+				assets <- Asset{
+					Path:           absPath,
+					ModName:        modName,
+					CurrentFmt:     info.Format,
+					Width:          info.Width,
+					Height:         info.Height,
+					HasAlpha:       info.HasAlpha,
+					ProfileMatch:   "Excluded",
+					Excluded:       true,
+					VirtualRelPath: relPath,
+				}
+				continue
+			}
+
+			// Profile matching uses relPath (relative to mod root, not modsDir).
+			profileName, suggestedFmt, profileExcluded := matchProfile(absPath, relPath, profiles)
+			if profileExcluded {
+				continue
+			}
+			if profileName == "" {
+				profileName = "Unmatched"
+			}
+
+			assets <- Asset{
+				Path:           absPath,
+				ModName:        modName,
+				CurrentFmt:     info.Format,
+				Width:          info.Width,
+				Height:         info.Height,
+				HasAlpha:       info.HasAlpha,
+				ProfileMatch:   profileName,
+				SuggestedFmt:   suggestedFmt,
+				VirtualRelPath: relPath,
+			}
+		}
+
+		skippedCh <- skipped
+		close(assets)
+		close(skippedCh)
 	}()
 
 	return assets, skippedCh, errs

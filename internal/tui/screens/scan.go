@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/noisethanks/atak/internal/config"
+	"github.com/noisethanks/atak/internal/modlist"
 	"github.com/noisethanks/atak/internal/scan"
 	"github.com/noisethanks/atak/internal/tools"
 	"github.com/noisethanks/atak/internal/tui/style"
@@ -24,6 +25,7 @@ type assetFoundMsg struct {
 type scanCompleteMsg struct {
 	total   int
 	skipped int
+	err     string // non-empty aborts to error display without navigating to results
 }
 
 // ScanModel shows a live counter while the walker runs.
@@ -57,14 +59,39 @@ func (m ScanModel) Init() tea.Cmd {
 }
 
 func (m ScanModel) startScan() tea.Cmd {
-	modsDir := m.cfg.ModsDir
+	cfg := m.cfg
 	ctx := m.ctx
 	return func() tea.Msg {
 		profiles, excludePatterns, minFileSize, _, err := config.LoadProfiles()
 		if err != nil || len(profiles) == 0 {
 			return scanCompleteMsg{total: 0}
 		}
-		ch, skippedCh, _ := scan.Walk(modsDir, profiles, excludePatterns, m.cfg.ScanExclusions, minFileSize)
+
+		const (
+			modlistErrNoPath  = "⚠ Mod Output Mode is enabled but no modlist.txt path is configured.\n  Go to Settings to set your MO2 modlist.txt path,\n  or disable Mod Output Mode to compress in-place."
+			modlistErrBadPath = "⚠ Mod Output Mode is enabled but modlist.txt could not be read.\n  Check the path in Settings, or disable Mod Output Mode to compress in-place."
+		)
+
+		if cfg.ModOutputMode {
+			// Never silently fall back to in-place when Mod Output Mode is on.
+			if cfg.ModlistPath == "" {
+				return NavigateMsg{To: NavResults, Data: ScanResultData{ModlistError: modlistErrNoPath}}
+			}
+			modList, parseErr := modlist.ParseModList(cfg.ModlistPath)
+			if parseErr != nil || len(modList) == 0 {
+				return NavigateMsg{To: NavResults, Data: ScanResultData{ModlistError: modlistErrBadPath}}
+			}
+			virtualFS, buildErr := modlist.BuildVirtualFS(cfg.ModsDir, modList)
+			if buildErr != nil {
+				return NavigateMsg{To: NavResults, Data: ScanResultData{ModlistError: modlistErrBadPath}}
+			}
+			// Auto-exclude the output folder so it's never scanned.
+			exclusions := append(cfg.ScanExclusions, cfg.ModOutputName)
+			ch, skippedCh, _ := scan.WalkVirtual(virtualFS, cfg.ModsDir, profiles, excludePatterns, exclusions, minFileSize)
+			return readNextAsset(ctx, ch, skippedCh)
+		}
+
+		ch, skippedCh, _ := scan.Walk(cfg.ModsDir, profiles, excludePatterns, cfg.ScanExclusions, minFileSize)
 		return readNextAsset(ctx, ch, skippedCh)
 	}
 }
@@ -98,6 +125,10 @@ func (m ScanModel) Update(msg tea.Msg) (ScanModel, tea.Cmd) {
 
 	case scanCompleteMsg:
 		m.done = true
+		if msg.err != "" {
+			m.err = msg.err
+			return m, nil
+		}
 		if m.found == 0 {
 			m.err = "No .dds files found in " + m.cfg.ModsDir
 			return m, nil

@@ -1,6 +1,7 @@
 package screens
 
 import (
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -18,17 +19,41 @@ const (
 	fieldBackupDir
 	fieldWorkers
 	fieldBackupLevel
+	fieldModOutputMode // bool toggle — no text input
+	fieldModOutputName // text input, shown only when ModOutputMode is on
+	fieldModlistPath   // text input, shown only when ModOutputMode is on
 	fieldCount
 )
 
+// inputIdx maps a field to its index in SettingsModel.inputs.
+// Returns -1 for fields that are not text inputs (e.g. the toggle).
+func inputIdx(f settingsField) int {
+	switch f {
+	case fieldModsDir:
+		return 0
+	case fieldBackupDir:
+		return 1
+	case fieldWorkers:
+		return 2
+	case fieldBackupLevel:
+		return 3
+	case fieldModOutputName:
+		return 4
+	case fieldModlistPath:
+		return 5
+	}
+	return -1
+}
+
 // SettingsModel handles configuring user preferences.
 type SettingsModel struct {
-	cfg     *config.Config
-	inputs  [4]textinput.Model // mods, backup, workers, backup-level
-	focused settingsField
-	errMsg  string
-	width   int
-	height  int
+	cfg           *config.Config
+	inputs        [6]textinput.Model // modsDir, backupDir, workers, backupLevel, modOutputName, modlistPath
+	modOutputMode bool
+	focused       settingsField
+	errMsg        string
+	width         int
+	height        int
 }
 
 func NewSettings(cfg *config.Config) SettingsModel {
@@ -49,10 +74,19 @@ func NewSettings(cfg *config.Config) SettingsModel {
 	backupLvl.SetValue(strconv.Itoa(cfg.BackupLevel))
 	backupLvl.Width = 6
 
+	modOutputName := textinput.New()
+	modOutputName.SetValue(cfg.ModOutputName)
+	modOutputName.Width = 30
+
+	modlistPath := textinput.New()
+	modlistPath.SetValue(cfg.ModlistPath)
+	modlistPath.Width = 60
+
 	return SettingsModel{
-		cfg:     cfg,
-		inputs:  [4]textinput.Model{mods, backup, workers, backupLvl},
-		focused: fieldModsDir,
+		cfg:           cfg,
+		inputs:        [6]textinput.Model{mods, backup, workers, backupLvl, modOutputName, modlistPath},
+		modOutputMode: cfg.ModOutputMode,
+		focused:       fieldModsDir,
 	}
 }
 
@@ -63,46 +97,71 @@ func (m SettingsModel) Update(msg tea.Msg) (SettingsModel, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "tab", "down":
-			m.focused = (m.focused + 1) % fieldCount
+			m.focused = m.nextField()
 			m.refocus()
+			return m, nil
 		case "shift+tab", "up":
-			m.focused = (m.focused + fieldCount - 1) % fieldCount
+			m.focused = m.prevField()
 			m.refocus()
+			return m, nil
 		case "enter":
 			return m.save()
+		case " ":
+			if m.focused == fieldModOutputMode {
+				m.modOutputMode = !m.modOutputMode
+				return m, nil
+			}
 		case "esc", "q":
 			return m, func() tea.Msg { return NavigateMsg{To: NavMenu} }
 		}
 	}
 
-	var cmd tea.Cmd
-	switch m.focused {
-	case fieldModsDir:
-		m.inputs[0], cmd = m.inputs[0].Update(msg)
-	case fieldBackupDir:
-		m.inputs[1], cmd = m.inputs[1].Update(msg)
-	case fieldWorkers:
-		m.inputs[2], cmd = m.inputs[2].Update(msg)
-	case fieldBackupLevel:
-		m.inputs[3], cmd = m.inputs[3].Update(msg)
+	idx := inputIdx(m.focused)
+	if idx >= 0 {
+		var cmd tea.Cmd
+		m.inputs[idx], cmd = m.inputs[idx].Update(msg)
+		return m, cmd
 	}
-	return m, cmd
+	return m, nil
 }
 
 func (m *SettingsModel) refocus() {
 	for i := range m.inputs {
 		m.inputs[i].Blur()
 	}
-	switch m.focused {
-	case fieldModsDir:
-		m.inputs[0].Focus()
-	case fieldBackupDir:
-		m.inputs[1].Focus()
-	case fieldWorkers:
-		m.inputs[2].Focus()
-	case fieldBackupLevel:
-		m.inputs[3].Focus()
+	idx := inputIdx(m.focused)
+	if idx >= 0 {
+		m.inputs[idx].Focus()
 	}
+}
+
+// nextField returns the next visible field after m.focused, wrapping around.
+func (m SettingsModel) nextField() settingsField {
+	for delta := 1; delta < int(fieldCount); delta++ {
+		next := settingsField((int(m.focused) + delta) % int(fieldCount))
+		if m.isVisible(next) {
+			return next
+		}
+	}
+	return m.focused
+}
+
+// prevField returns the previous visible field before m.focused, wrapping around.
+func (m SettingsModel) prevField() settingsField {
+	for delta := 1; delta < int(fieldCount); delta++ {
+		prev := settingsField((int(m.focused) - delta + int(fieldCount)) % int(fieldCount))
+		if m.isVisible(prev) {
+			return prev
+		}
+	}
+	return m.focused
+}
+
+func (m SettingsModel) isVisible(f settingsField) bool {
+	if f == fieldModOutputName || f == fieldModlistPath {
+		return m.modOutputMode
+	}
+	return true
 }
 
 func (m SettingsModel) save() (SettingsModel, tea.Cmd) {
@@ -114,11 +173,18 @@ func (m SettingsModel) save() (SettingsModel, tea.Cmd) {
 	if err != nil || backupLevel < 1 || backupLevel > 9 {
 		backupLevel = m.cfg.BackupLevel
 	}
+	modOutputName := strings.TrimSpace(m.inputs[4].Value())
+	if modOutputName == "" {
+		modOutputName = "ATAK"
+	}
 	updated := *m.cfg
 	updated.ModsDir = strings.TrimSpace(m.inputs[0].Value())
 	updated.BackupDir = strings.TrimSpace(m.inputs[1].Value())
 	updated.WorkerCount = workers
 	updated.BackupLevel = backupLevel
+	updated.ModOutputMode = m.modOutputMode
+	updated.ModOutputName = modOutputName
+	updated.ModlistPath = strings.TrimSpace(m.inputs[5].Value())
 	return m, func() tea.Msg {
 		return NavigateMsg{To: NavSaveConfig, Data: &updated}
 	}
@@ -128,12 +194,14 @@ func (m SettingsModel) View() string {
 	var b strings.Builder
 	b.WriteString(style.StyleTitle.Render("Settings") + "\n\n")
 
-	rows := []struct {
+	type row struct {
 		label   string
 		field   settingsField
 		content string
 		hint    string
-	}{
+	}
+
+	rows := []row{
 		{"Anomaly Mods Directory", fieldModsDir, m.inputs[0].View(), ""},
 		{"Backup Directory", fieldBackupDir, m.inputs[1].View(), ""},
 		{"Worker Threads", fieldWorkers, m.inputs[2].View(), "Conservative default (CPU/4). Increase if compression feels slow and your system has headroom."},
@@ -153,11 +221,48 @@ func (m SettingsModel) View() string {
 		b.WriteString("\n")
 	}
 
+	// Mod Output Mode toggle.
+	{
+		toggleLabel := "Mod Output Mode"
+		toggleValue := "[ off ]"
+		if m.modOutputMode {
+			toggleValue = style.StyleSuccess.Render("[ on  ]")
+		}
+		if m.focused == fieldModOutputMode {
+			b.WriteString(style.StyleSelected.Render(toggleLabel) + "\n")
+		} else {
+			b.WriteString(style.StyleBody.Render(toggleLabel) + "\n")
+		}
+		b.WriteString(toggleValue + "\n")
+		b.WriteString(style.StyleMuted.Render("Output compressed textures to a single MO2-compatible mod folder instead of compressing in-place.") + "\n\n")
+	}
+
+	// Conditional fields — shown only when Mod Output Mode is on.
+	if m.modOutputMode {
+		modOutputNameLabel := style.StyleBody.Render("Output Mod Name")
+		if m.focused == fieldModOutputName {
+			modOutputNameLabel = style.StyleSelected.Render("Output Mod Name")
+		}
+		b.WriteString(modOutputNameLabel + "\n" + m.inputs[4].View() + "\n")
+		b.WriteString(style.StyleMuted.Render("Name of the output mod folder created inside your mods directory.") + "\n")
+		outputFolder := filepath.Join(m.cfg.ModsDir, m.inputs[4].Value())
+		b.WriteString(style.StyleMuted.Render("Output folder: "+outputFolder) + "\n")
+		b.WriteString(style.StyleMuted.Render("Delete this folder to force recompression on next run.") + "\n\n")
+
+		modlistLabel := style.StyleBody.Render("MO2 modlist.txt Path")
+		if m.focused == fieldModlistPath {
+			modlistLabel = style.StyleSelected.Render("MO2 modlist.txt Path")
+		}
+		b.WriteString(modlistLabel + "\n" + m.inputs[5].View() + "\n")
+		b.WriteString(style.StyleMuted.Render("Full path to your MO2 profile's modlist.txt. Leave empty to scan all mods without priority merging.") + "\n\n")
+	}
+
 	if m.errMsg != "" {
 		b.WriteString(style.StyleDanger.Render(m.errMsg) + "\n\n")
 	}
 
 	b.WriteString(style.KeyHint("tab", "next") + "  ")
+	b.WriteString(style.KeyHint("space", "toggle") + "  ")
 	b.WriteString(style.KeyHint("enter", "save") + "  ")
 	b.WriteString(style.KeyHint("q", "cancel"))
 	return b.String()
