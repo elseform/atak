@@ -36,17 +36,26 @@ chmod +x atak-linux
 
 ## First time? Start here.
 
-**Back up before you compress. Always.**
+ATAK defaults to **Mod Output Mode** — a non-destructive workflow that outputs compressed textures to a separate MO2 mod folder instead of modifying your originals. This is the recommended approach.
 
-1. Launch ATAK and go to **Backup Manager**
-2. Create a backup of your Anomaly mods directory — this is your safety net
-3. Go to **Scan & Compress**
-4. Let it scan your modlist
-5. Press **[m]** to compress a single mod first — verify it looks right in game
-6. If happy, press **[r]** to compress everything
-7. If something looks wrong, restore from backup and try again
+**Setup:**
+1. Launch ATAK and go to **Settings**
+2. Set your MO2 `modlist.txt` path
+3. Set output mod name (default: `ATAK`)
+4. Go to **Backup Manager** and create a backup — still recommended as a safety net
+5. Go to **Scan & Compress** and press **[r]** to compress everything
+6. Add the output folder (e.g. `mods/ATAK/`) as a mod in MO2
+7. Place it at the **top** of your load order and enable it
 
-Compression is always in-place. Your originals are gone after compression — that's what the backup is for.
+**To compress in-place instead** (replaces original files — make a backup first):
+Disable Mod Output Mode in Settings. Then follow the backup-first workflow below.
+
+**In-place workflow:**
+1. Go to **Backup Manager** — create a backup first, always
+2. Go to **Scan & Compress**
+3. Press **[m]** to compress a single mod first — verify it looks right in game
+4. If happy, press **[r]** to compress everything
+5. If something looks wrong, restore from backup
 
 ---
 
@@ -57,14 +66,23 @@ Compression is always in-place. Your originals are gone after compression — th
 - Restore individual mods or your entire modlist from backup
 - Verify archive integrity
 
+### Mod Output Mode
+Non-destructive compression that reads your MO2 `modlist.txt` to build a virtual filesystem — the same merged view MO2 presents to the game. Only the winning file for each texture path is compressed (respecting load order). Output goes to a single flat mod folder you add to MO2.
+
+- Your original textures are never modified
+- Incremental updates — rerun after adding mods, only new files are compressed
+- Delete the output folder to force full recompression
+- If scan shows 0 textures, check your modlist.txt path in Settings
+
 ### Scan & Compress
-ATAK scans your modlist for uncompressed DDS textures and classifies them by type using filename patterns and directory paths. Only textures explicitly matched by a profile are compressed — nothing is touched blindly.
+ATAK scans for uncompressed DDS textures and classifies them by type using filename patterns and directory paths. Only textures explicitly matched by a profile are compressed — nothing is touched blindly.
 
 Default profiles cover the most common texture categories:
 
 | Profile | Format | Detection method |
 |---|---|---|
 | Normal / bump maps | BC5 | `_bump`, `_normal`, `_nrm`, `_norm` suffixes |
+| Sights / Reticles | BC3 | `scope_reticles/`, `bonus_sights/`, `*crosshair*` |
 | UI / Icons | BC3 | `textures/ui/` path |
 | Diffuse / color | BC3 | `_diff`, `_base`, `_col`, `_d` suffixes |
 | Weapon textures | BC3 | `textures/wpn/`, `textures/rwap/` paths |
@@ -97,7 +115,7 @@ ATAK uses BCn block compression — a GPU-native format that decompresses in har
 
 **BC7 on Linux** is CPU-only — no GPU acceleration available. Expect 40-60 minutes for large jobs. For faster Linux compression, use BC3 for all profiles (the default). Quality difference is minimal at normal viewing distances.
 
-**Mip chains:** ATAK generates a full mip chain during compression using cubic filtering. This allows the engine to load lower-resolution versions of textures for distant objects, reducing effective VRAM usage further. Keep your in-game texture quality setting at High — lowering it unnecessarily on top of BCn compression will reduce visual quality.
+**Mip chains:** ATAK generates a full mip chain during compression using cubic filtering. This allows the engine to load lower-resolution versions of textures for distant objects, reducing effective VRAM usage further. Keep your in-game texture quality setting at High — lowering it on top of BCn compression will reduce visual quality unnecessarily.
 
 ---
 
@@ -110,21 +128,31 @@ Config lives at:
 
 ### config.json
 
-Controls tool behavior — paths, workers, backup settings, scan exclusions.
-
 ```json
 {
   "modsDir": "/path/to/Anomaly/mods",
   "backupDir": "/path/to/backups",
   "workerCount": 1,
+  "backupThreads": 4,
   "backupLevel": 6,
-  "scanExclusions": [".*", "downloads", "Downloads", "G.A.M.M.A. UI"]
+  "scanExclusions": [".*", "downloads", "Downloads", "G.A.M.M.A. UI"],
+  "modOutputMode": true,
+  "modOutputName": "ATAK",
+  "modlistPath": "/path/to/MO2/profiles/Default/modlist.txt"
 }
 ```
 
-- `workerCount` — concurrent texconv processes. Each worker pegs one CPU core. Increase only if compression feels slow and your system handles it. Default: 1
-- `backupLevel` — 7-Zip compression level 1-9. Default: 6 (balanced). Higher = smaller archive, longer backup time
-- `scanExclusions` — directory names to skip entirely during scan. Glob patterns matched against directory name
+- `workerCount` — concurrent texconv processes (compression only). Each worker pegs one CPU core. Default: 1
+- `backupThreads` — 7-Zip thread count for backup/restore operations. Default: half your CPU threads
+- `backupLevel` — 7-Zip compression level 1-9. Default: 6
+- `scanExclusions` — directory names to skip during scan
+- `modOutputMode` — non-destructive output mode. Default: true
+- `modOutputName` — output mod folder name. Default: "ATAK"
+- `modlistPath` — path to MO2 `modlist.txt`. Required when `modOutputMode` is true
+
+**Finding your modlist.txt:**
+- Usually at `<MO2 install>/profiles/<Profile Name>/modlist.txt`
+- In MO2: click the profile dropdown → "Open Profile Folder"
 
 ### profiles.json
 
@@ -133,7 +161,7 @@ Controls which textures get compressed and how. Created on first run from embedd
 ```json
 {
   "minFileSizeBytes": 1024,
-  "excludePatterns": ["fx_sun*", "fx_*", "lut_*"],
+  "excludePatterns": ["fx_sun*", "fx_*", "lut_*", "*#small*", "*cube#*"],
   "profiles": [
     {
       "name": "Normal Maps",
@@ -148,23 +176,27 @@ Controls which textures get compressed and how. Created on first run from embedd
 ```
 
 **Top-level fields:**
-- `minFileSizeBytes` — skip files smaller than this. Default: 1024. Protects against stub/placeholder textures that produce artifacts when compressed
+- `minFileSizeBytes` — skip files smaller than this. Default: 1024
 - `excludePatterns` — filename glob patterns never compressed regardless of profile match
 
 **Per-profile fields:**
 - `name` — display name in scan results
-- `format` — compression format. See table above. Use `BC5_UNORM` for normal maps, `BC3_UNORM` for everything else unless you want BC7 quality
-- `generateMips` — generate full mip chain during compression. `true` for most textures, `false` for UI (displayed at exact pixel size)
-- `maxTextureSize` — cap output resolution. `0` = no limit. Set to `1024` on sky/terrain profiles for 4GB VRAM cards. Textures smaller than this value are not upscaled
-- `patterns` — glob patterns matched against filename or full path. Path patterns must contain `/`
-- `exclude` — optional per-profile exclusions. Files matching `patterns` but also matching `exclude` are skipped
+- `format` — compression format. See table above
+- `generateMips` — generate full mip chain. `true` for most textures, `false` for UI
+- `maxTextureSize` — cap output resolution. `0` = no limit. Set to `1024` on sky/terrain profiles for 4GB VRAM cards. Textures smaller than this value are never upscaled
+- `patterns` — glob patterns matched against filename or full path
+- `exclude` — optional per-profile exclusions
 
 **Pattern syntax:**
 - `*` matches any characters except `/`
 - Patterns without `/` match filename only: `*_bump.*` matches `rock_bump.dds`
-- Patterns with `/` match full path: `*/textures/wpn/*` matches any file under a `textures/wpn/` directory
+- Patterns with `/` match full path: `*/textures/wpn/*` matches any file under `textures/wpn/`
 - Matching is case-insensitive on all platforms
 - **Order matters — first match wins.** Put specific patterns before general ones
+
+Community profiles available in the `profiles/` directory in the repository:
+- `default.json` — conservative BC3 defaults (same as embedded)
+- `quality.json` — BC7 for weapons and characters (Windows GPU recommended)
 
 ---
 
@@ -192,6 +224,7 @@ For 4GB VRAM cards, set `"maxTextureSize": 1024` on Sky and Terrain profiles in 
 - Cancelling a compression job deletes the in-progress file — originals untouched
 - 7-Zip backup progress is sparse on large solid archives — the archive is growing even when the progress bar appears stuck
 - If the app crashes during backup/restore on Linux, run `pkill 7zz` if you notice high CPU/RAM usage afterwards
+- Mod Output Mode without a valid modlist.txt will show 0 textures — check Settings if this happens
 
 ---
 
@@ -208,7 +241,7 @@ go build -o atak-linux .
 Release build:
 ```bash
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
-  -ldflags="-s -w -X main.version=v0.1.0" \
+  -ldflags="-s -w -X main.version=v0.2.0" \
   -o atak-linux .
 ```
 
