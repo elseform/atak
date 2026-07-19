@@ -6,8 +6,11 @@ import (
 )
 
 // ParseModList reads an MO2 modlist.txt and returns enabled mod names in
-// priority order (highest priority first). MO2 lists low priority first,
-// so the slice is reversed before returning.
+// priority order (highest priority first).
+//
+// MO2's modlist.txt is already stored highest priority first: the top line is
+// the mod that wins loose-file conflicts, the bottom line is lowest priority.
+// This matches the order BuildVirtualFS expects, so file order is preserved.
 func ParseModList(path string) ([]string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -23,9 +26,5 @@ func ParseModList(path string) ([]string, error) {
 		}
 	}
 
-	// Reverse: modlist.txt is low→high, callers want high→low.
-	for i, j := 0, len(enabled)-1; i < j; i, j = i+1, j-1 {
-		enabled[i], enabled[j] = enabled[j], enabled[i]
-	}
 	return enabled, nil
 }
