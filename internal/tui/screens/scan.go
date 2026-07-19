@@ -3,6 +3,7 @@ package screens
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -81,13 +82,28 @@ func (m ScanModel) startScan() tea.Cmd {
 			if parseErr != nil || len(modList) == 0 {
 				return NavigateMsg{To: NavResults, Data: ScanResultData{ModlistError: modlistErrBadPath}}
 			}
-			virtualFS, buildErr := modlist.BuildVirtualFS(cfg.ModsDir, modList)
+			// Auto-exclude the output folder so it's never scanned.
+			exclusions := append(cfg.ScanExclusions, cfg.ModOutputName)
+			// Filter excluded mods before building the virtual FS so they never
+			// win conflicts — analogous to Walk's filepath.SkipDir on directories.
+			var filteredList []string
+			for _, mod := range modList {
+				exc := false
+				for _, pattern := range exclusions {
+					if m, _ := filepath.Match(pattern, mod); m {
+						exc = true
+						break
+					}
+				}
+				if !exc {
+					filteredList = append(filteredList, mod)
+				}
+			}
+			virtualFS, buildErr := modlist.BuildVirtualFS(cfg.ModsDir, filteredList)
 			if buildErr != nil {
 				return NavigateMsg{To: NavResults, Data: ScanResultData{ModlistError: modlistErrBadPath}}
 			}
-			// Auto-exclude the output folder so it's never scanned.
-			exclusions := append(cfg.ScanExclusions, cfg.ModOutputName)
-			ch, skippedCh, _ := scan.WalkVirtual(virtualFS, cfg.ModsDir, profiles, excludePatterns, exclusions, minFileSize)
+			ch, skippedCh, _ := scan.WalkVirtual(virtualFS, cfg.ModsDir, profiles, excludePatterns, minFileSize)
 			return readNextAsset(ctx, ch, skippedCh)
 		}
 

@@ -6,7 +6,8 @@
     "*_lm.*", "*_cm.*", "*_nm2.*",
     "*detail_map*", "*_hm.*",
     "lut_*",
-    "*#small*", "*cube#*", "*_cube#*"
+    "*#small*", "*cube#*", "*_cube#*",
+    "*/textures/ui/SquareDOV/*"
   ],
   "profiles": [
     {

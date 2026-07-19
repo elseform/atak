@@ -143,8 +143,13 @@ overwrites it on subsequent launches.
 - `minFileSizeBytes` — integer, default 1024. Files smaller than this value are
   skipped silently. Protects against compressing stub/placeholder textures which
   produce garbage output (e.g. leopard print artifacts).
-- `excludePatterns` — array of glob patterns matched against filename (basename).
-  Files matching any pattern are never compressed regardless of profile match.
+- `excludePatterns` — array of glob patterns. Matching rules:
+  - Patterns **without** `/` match against the filename (basename) only
+  - Patterns **containing** `/` match against the full relative path from the
+    mod root (e.g. `*/textures/ui/SquareDOV/*` excludes all files under that
+    directory regardless of which mod provides them)
+  - Matching is case-insensitive on all platforms
+  - Files matching any pattern are never compressed regardless of profile match
 
 **Per profile:**
 - `name` — display name shown in scan results UI
@@ -226,6 +231,22 @@ More specific path patterns must come before more general ones:
 - `*/textures/sky/night/*` must appear before `*/textures/sky/*`
 - Filename suffix patterns (`*_bump.*`) are order-independent since they don't overlap
 
+**The `_bump` suffix is not a reliable indicator of BC5 compatibility.**
+Some mods use `_bump` naming for textures that carry more than XY normal data —
+scope lens reflection textures in particular often use all 4 RGBA channels for
+reflection intensity, gloss, and specular data. Compressing these with BC5 (which
+discards B and A channels) causes visual artifacts — loss of reflections, banding
+on metallic surfaces.
+
+Mitigation:
+- Add `"exclude": ["*scope*bump*", "*lens_bump*"]` to the Normal Maps profile
+- Add a dedicated Scope Textures profile using BC7_UNORM before Weapon Textures
+- BC7 correctly handles all 4 channels and is appropriate for complex
+  metallic/reflective surfaces regardless of naming convention
+
+When in doubt about a texture's channel usage, check with dds_analyze —
+`UNCOMPRESSED_RGBA` with a `_bump` suffix means BC5 is wrong for that texture.
+
 **The embedded default** (`configs/compression_profiles.json`) is the seed — it ships
 with broadly correct STALKER conventions but users are expected to tune it:
 
@@ -238,7 +259,8 @@ with broadly correct STALKER conventions but users are expected to tune it:
     "lut_*",
     "*#small*",
     "*cube#*",
-    "*_cube#*"
+    "*_cube#*",
+    "*/textures/ui/SquareDOV/*"
   ],
   "profiles": [
     {
@@ -263,11 +285,12 @@ with broadly correct STALKER conventions but users are expected to tune it:
         "*_nm.*", "*_nm_*",
         "*_nmap.*", "*_norm.*", "*_norm_*",
         "*nbump*", "*_normalbump*"
-      ]
+      ],
+      "exclude": ["*scope*bump*", "*lens_bump*"]
     },
     {
       "name": "UI / Icons",
-      "format": "BC3_UNORM",
+      "format": "BC7_UNORM",
       "generateMips": false,
       "patterns": ["*/textures/ui/*", "*_icons.*"]
     },
@@ -321,6 +344,17 @@ with broadly correct STALKER conventions but users are expected to tune it:
       ]
     },
     {
+      "name": "Scope Textures",
+      "format": "BC7_UNORM",
+      "generateMips": true,
+      "patterns": [
+        "*/textures/wpn/scope_*",
+        "*scope*diff*",
+        "*scope*bump*",
+        "*lens_bump*"
+      ]
+    },
+    {
       "name": "Weapon Textures",
       "format": "BC3_UNORM",
       "generateMips": true,
@@ -365,11 +399,17 @@ with broadly correct STALKER conventions but users are expected to tune it:
 }
 ```
 
-Note: Weapon Textures and Character/Hands use BC3 in `default.json` for safety
-and Linux CPU performance. The `quality.json` profile upgrades these to BC7 for
-users who want better visual quality on high-detail weapon and character textures.
-These are the textures players look at most closely — BC7 makes a visible
-difference here more than anywhere else.
+Note on format choices:
+- **UI/Icons uses BC7** — UI textures frequently use smooth alpha gradients for
+  circular minimap masks, soft-edged HUD elements, and transparent overlays.
+  BC3's alpha compression (4 bits/pixel in 4x4 blocks) causes visible banding
+  and artifact borders on these. BC7 handles alpha gradients correctly. No
+  runtime performance cost — BCn decompresses in hardware at the same speed
+  regardless of format.
+- **Scope Textures use BC7** — scope bump textures often use all 4 RGBA channels
+  for reflection/gloss data, not just XY normals. BC5 would destroy B and A.
+- **Weapon Textures and Character/Hands use BC3** in `default.json` for Linux
+  CPU performance. The `quality.json` profile upgrades these to BC7.
 
 Notes:
 - All profiles default to BC3_UNORM except Normal Maps (BC5 required for two-channel
@@ -684,12 +724,18 @@ profile's `patterns` but should be skipped:
 
 #### Global Exclusion Patterns
 
-`profiles.json` supports a top-level `excludePatterns` array — filename patterns
-that are never compressed regardless of profile match:
+`profiles.json` supports a top-level `excludePatterns` array. Patterns without
+`/` match against the filename (basename). Patterns containing `/` match against
+the full relative path from the mod root — useful for excluding specific texture
+directories regardless of which mod provides them:
 
 ```json
 {
-  "excludePatterns": ["fx_sun*", "*_lm.*", "*_cm.*", "*_nm2.*"],
+  "excludePatterns": [
+    "fx_sun*",
+    "*_lm.*",
+    "*/textures/ui/SquareDOV/*"
+  ],
   "profiles": [...]
 }
 ```
@@ -726,6 +772,10 @@ Default value shipped in config:
 - `downloads` / `Downloads` — skips the Anomaly/GAMMA downloads folder (both cases for Linux)
 - `G.A.M.M.A. UI` — skips the GAMMA UI mod directory. Compressing main menu assets
   causes excessive loading times — confirmed by community testing
+
+Note: SquareDOV minimap textures are excluded via `*/textures/ui/SquareDOV/*` in
+`excludePatterns` in `profiles.json` — path-based exclusion covers all mods that
+ship those textures regardless of mod name or number prefix.
 
 Surfaced in the Settings screen as an editable list — users can add or remove patterns.
 
@@ -1152,22 +1202,22 @@ MO2's modlist.txt format:
 
 - `+` prefix = enabled
 - `-` prefix = disabled
-- Order = priority (first line = highest priority in MO2; the top mod wins loose-file conflicts)
+- Order = priority (FIRST line = highest priority in MO2)
 
 Parsing:
 1. Read file, split on newlines, trim whitespace
 2. Filter to lines starting with `+`
 3. Strip `+` prefix to get mod names
-4. Return `[]string` of enabled mod names in priority order (high → low)
-
-modlist.txt is already stored highest priority first, so file order is preserved — no reversal. This is the order `buildVirtualFS` expects.
+4. Do NOT reverse — modlist.txt already lists high priority first
+5. Return `[]string` of enabled mod names in priority order (high → low)
 
 ### Virtual filesystem
 
 ```go
 func buildVirtualFS(modsDir string, modList []string) map[string]string {
     // map[relPath]absoluteSourcePath
-    // iterate low→high priority, higher priority overwrites
+    // iterate high→low priority, lower priority overwrites
+    // (so high priority mods win — they are processed last, overwriting lower ones)
     virtual := map[string]string{}
     for i := len(modList)-1; i >= 0; i-- {
         modPath := filepath.Join(modsDir, modList[i])
