@@ -1152,14 +1152,15 @@ MO2's modlist.txt format:
 
 - `+` prefix = enabled
 - `-` prefix = disabled
-- Order = priority (last line = highest priority in MO2)
+- Order = priority (first line = highest priority in MO2; the top mod wins loose-file conflicts)
 
 Parsing:
 1. Read file, split on newlines, trim whitespace
 2. Filter to lines starting with `+`
 3. Strip `+` prefix to get mod names
-4. Reverse order — modlist.txt lists low priority first, ATAK needs high priority first
-5. Return `[]string` of enabled mod names in priority order (high → low)
+4. Return `[]string` of enabled mod names in priority order (high → low)
+
+modlist.txt is already stored highest priority first, so file order is preserved — no reversal. This is the order `buildVirtualFS` expects.
 
 ### Virtual filesystem
 
