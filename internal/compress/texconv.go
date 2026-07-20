@@ -93,12 +93,11 @@ func Run(ctx context.Context, texconvPath string, asset scan.Asset, format strin
 func runOnce(ctx context.Context, texconvPath, inputPath, format string, maxTextureSize int, outputDir string) (success bool, stderr string, err error, after int64) {
 	args := []string{
 		"-f", format,
-		"-m", "0",       // full mip chain
-		"-if", "CUBIC",  // cubic interpolation for mip generation
-		"-bc", "x",      // quick BCn encoding (major BC7 speedup)
-		"-gpu", "0",     // GPU accelerated compression, falls back to CPU if unavailable
-		"-y",            // overwrite
-		"-nologo",       // suppress header
+		"-m", "0",      // full mip chain
+		"-if", "CUBIC", // cubic interpolation for mip generation
+		"-gpu", "0",    // GPU accelerated compression, falls back to CPU if unavailable
+		"-y",           // overwrite
+		"-nologo",      // suppress header
 		"-o", outputDir,
 	}
 	if maxTextureSize > 0 {

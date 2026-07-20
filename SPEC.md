@@ -260,7 +260,8 @@ with broadly correct STALKER conventions but users are expected to tune it:
     "*#small*",
     "*cube#*",
     "*_cube#*",
-    "*/textures/ui/SquareDOV/*"
+    "*/textures/ui/SquareDOV/*",
+    "*scope*diff*"
   ],
   "profiles": [
     {
@@ -837,18 +838,22 @@ remains — it is still needed to show the OperationScreen during compression.
 - Worker pool: `max(1, runtime.NumCPU()/2)` concurrent texconv processes
 - Per-file texconv invocation:
   ```
-  texconv -f <FORMAT> -m 0 -if CUBIC -bc x -gpu 0 -y -nologo     [-w <maxTextureSize> -h <maxTextureSize>]     -o <output_dir> -- <input_file>
+  texconv -f <FORMAT> -m 0 -if CUBIC -gpu 0 -y -nologo [-w <maxTextureSize>] -o <output_dir> -- <input_file>
   ```
   Note: `--` separator is required before input path — paths starting with `/`
   are interpreted as flags without it.
   `-m 0` generates full mip chain if `generateMips == true` in profile,
   or `-m 1` for no mips if `generateMips == false`
   `-if CUBIC` cubic interpolation for mip generation (better quality)
-  `-bc x` quick BCn encoding (major BC7 speedup)
-  `-gpu 0` GPU accelerated compression (falls back to CPU on Linux)
+  `-gpu 0` GPU accelerated compression (DirectX GPU on Windows, CPU fallback on Linux)
   `-nologo` suppress Microsoft header output
-  `-w <n> -h <n>` only added when profile `maxTextureSize > 0` — caps output
-  dimensions. texconv will not upscale if input is smaller than the limit.
+  `-w <n>` only added when `maxTextureSize > 0` — caps width, height scales
+  proportionally. Never applied when input is smaller than the limit.
+
+  Note: `-bc x` (quick BC7 encoder) intentionally removed. The exhaustive BC7
+  encoder produces significantly better quality on metallic and reflective surfaces
+  (scopes, weapons). On Windows with GPU acceleration there is no meaningful speed
+  impact. Linux users running BC7 profiles should expect longer compression times.
 
 - **BC7 → BC3 automatic fallback:** If texconv exits non-zero with BC7_UNORM,
   automatically retry with BC3_UNORM. Matches proven bash script behavior.

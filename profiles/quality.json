@@ -1,113 +1,195 @@
 {
-  "_note": "Quality profile — BC7_UNORM for weapons, characters, and diffuse. BC7 is CPU-intensive on Linux (no GPU acceleration); expect 3-5x slower compression than default. Will use GPU accceleration on Windows.",
-  "minFileSizeBytes": 1024,
-  "excludePatterns": [
-    "fx_sun*", "fx_*",
-    "*_lm.*", "*_cm.*", "*_nm2.*",
-    "*detail_map*", "*_hm.*",
-    "lut_*",
-    "*#small*", "*cube#*", "*_cube#*",
-    "*/textures/ui/SquareDOV/*"
-  ],
-  "profiles": [
-    {
-      "name": "UI Readables",
-      "format": "BC3_UNORM",
-      "generateMips": false,
-      "patterns": ["*/textures/ui/readables/*", "*/textures/ui/npe/*"]
-    },
-    {
-      "name": "Flares / FX",
-      "format": "BC3_UNORM",
-      "generateMips": false,
-      "patterns": ["*/textures/anamflares/*", "*/textures/flares/*"]
-    },
-    {
-      "name": "Particle / FX",
-      "format": "BC3_UNORM",
-      "generateMips": false,
-      "patterns": ["*/textures/semitone/*"]
-    },
-    {
-      "name": "Normal Maps",
-      "format": "BC5_UNORM",
-      "generateMips": true,
-      "patterns": [
-        "*_bump.*", "*_bump#.*", "*_normal.*", "*_nm.*", "*_nmap.*",
-        "*_nrm.*", "*_norm.*", "*_norm_*", "*nbump*", "*_normalbump.*", "*_nm_*"
-      ]
-    },
-    {
-      "name": "Custom UI",
-      "format": "BC3_UNORM",
-      "generateMips": false,
-      "patterns": ["*/textures/catsy/*"]
-    },
-    {
-      "name": "UI / Icons",
-      "format": "BC3_UNORM",
-      "generateMips": false,
-      "patterns": ["*/textures/ui/*", "*_icons.*"]
-    },
-    {
-      "name": "Diffuse / Color",
-      "format": "BC7_UNORM",
-      "generateMips": true,
-      "patterns": [
-        "*_d.*", "*_diff.*", "*_diffuse.*",
-        "*_albedo.*", "*_base.*",
-        "*_col.*", "*_color.*", "*_co.*",
-        "*_c.*", "*_b.*", "*_rgb.*",
-        "*_details.*"
-      ]
-    },
-    {
-      "name": "Specular / Gloss",
-      "format": "BC3_UNORM",
-      "generateMips": true,
-      "patterns": ["*_spec.*", "*_gloss.*"]
-    },
-    {
-      "name": "Masks / Alpha",
-      "format": "BC3_UNORM",
-      "generateMips": true,
-      "patterns": ["*_mask.*", "*_alpha.*"]
-    },
-    {
-      "name": "Sky Textures",
-      "format": "BC3_UNORM",
-      "generateMips": true,
-      "patterns": ["*/textures/sky/*"]
-    },
-    {
-      "name": "Detail / Terrain",
-      "format": "BC3_UNORM",
-      "generateMips": true,
-      "patterns": ["*/textures/detail/*", "*/textures/terrain/*"]
-    },
-    {
-      "name": "Sights / Reticles",
-      "format": "BC3_UNORM",
-      "generateMips": false,
-      "patterns": ["*/textures/wpn/scope_reticles/*", "*/textures/bonus_sights/*", "*crosshair*", "*reticle*", "*_reticle.*", "*_crosshair.*"]
-    },
-    {
-      "name": "Weapon Textures",
-      "format": "BC7_UNORM",
-      "generateMips": true,
-      "patterns": ["*/textures/wpn/*", "*/textures/rwap/*"]
-    },
-    {
-      "name": "Character / Hands",
-      "format": "BC7_UNORM",
-      "generateMips": true,
-      "patterns": ["*/textures/act/*", "*/textures/MK/*"]
-    },
-    {
-      "name": "Items",
-      "format": "BC3_UNORM",
-      "generateMips": true,
-      "patterns": ["*/textures/items/*", "*/textures/item/*", "*/textures/usable_items/*", "*/textures/farcry4/*", "*/textures/artifact/*", "*/textures/gwr/*"]
-    }
-  ]
+    "_note": "Quality profile — BC7_UNORM for weapons, characters, and diffuse. BC7 is CPU-intensive on Linux (no GPU acceleration); expect 3-5x slower compression than default. Will use GPU accceleration on Windows.",
+    "minFileSizeBytes": 1024,
+    "excludePatterns": [
+        "fx_sun*",
+        "fx_*",
+        "*_lm.*",
+        "*_cm.*",
+        "*_nm2.*",
+        "*detail_map*",
+        "*_hm.*",
+        "lut_*",
+        "*#small*",
+        "*cube#*",
+        "*_cube#*",
+        "*/textures/ui/SquareDOV/*",
+        "*scope*diff*"
+    ],
+    "profiles": [
+        {
+            "name": "UI Readables",
+            "format": "BC3_UNORM",
+            "generateMips": false,
+            "patterns": [
+                "*/textures/ui/readables/*",
+                "*/textures/ui/npe/*"
+            ]
+        },
+        {
+            "name": "Flares / FX",
+            "format": "BC3_UNORM",
+            "generateMips": false,
+            "patterns": [
+                "*/textures/anamflares/*",
+                "*/textures/flares/*"
+            ]
+        },
+        {
+            "name": "Particle / FX",
+            "format": "BC3_UNORM",
+            "generateMips": false,
+            "patterns": [
+                "*/textures/semitone/*"
+            ]
+        },
+        {
+            "name": "Normal Maps",
+            "format": "BC5_UNORM",
+            "generateMips": true,
+            "exclude": [
+                "*scope*bump*",
+                "*lens_bump*"
+            ],
+            "patterns": [
+                "*_bump.*",
+                "*_bump#.*",
+                "*_normal.*",
+                "*_nm.*",
+                "*_nmap.*",
+                "*_nrm.*",
+                "*_norm.*",
+                "*_norm_*",
+                "*nbump*",
+                "*_normalbump.*",
+                "*_nm_*"
+            ]
+        },
+        {
+            "name": "Custom UI",
+            "format": "BC3_UNORM",
+            "generateMips": false,
+            "patterns": [
+                "*/textures/catsy/*"
+            ]
+        },
+        {
+            "name": "UI / Icons",
+            "format": "BC3_UNORM",
+            "generateMips": false,
+            "patterns": [
+                "*/textures/ui/*",
+                "*_icons.*"
+            ]
+        },
+        {
+            "name": "Diffuse / Color",
+            "format": "BC7_UNORM",
+            "generateMips": true,
+            "patterns": [
+                "*_d.*",
+                "*_diff.*",
+                "*_diffuse.*",
+                "*_albedo.*",
+                "*_base.*",
+                "*_col.*",
+                "*_color.*",
+                "*_co.*",
+                "*_c.*",
+                "*_b.*",
+                "*_rgb.*",
+                "*_details.*"
+            ]
+        },
+        {
+            "name": "Specular / Gloss",
+            "format": "BC3_UNORM",
+            "generateMips": true,
+            "patterns": [
+                "*_spec.*",
+                "*_gloss.*"
+            ]
+        },
+        {
+            "name": "Masks / Alpha",
+            "format": "BC3_UNORM",
+            "generateMips": true,
+            "patterns": [
+                "*_mask.*",
+                "*_alpha.*"
+            ]
+        },
+        {
+            "name": "Sky Textures",
+            "format": "BC3_UNORM",
+            "generateMips": true,
+            "patterns": [
+                "*/textures/sky/*"
+            ]
+        },
+        {
+            "name": "Detail / Terrain",
+            "format": "BC3_UNORM",
+            "generateMips": true,
+            "patterns": [
+                "*/textures/detail/*",
+                "*/textures/terrain/*"
+            ]
+        },
+        {
+            "name": "Sights / Reticles",
+            "format": "BC3_UNORM",
+            "generateMips": false,
+            "patterns": [
+                "*/textures/wpn/scope_reticles/*",
+                "*/textures/bonus_sights/*",
+                "*crosshair*",
+                "*reticle*",
+                "*_reticle.*",
+                "*_crosshair.*"
+            ]
+        },
+        {
+            "name": "Scope Textures",
+            "format": "BC7_UNORM",
+            "generateMips": true,
+            "patterns": [
+                "*/textures/wpn/scope_*",
+                "*scope*diff*",
+                "*scope*bump*",
+                "*lens_bump*"
+            ]
+        },
+        {
+            "name": "Weapon Textures",
+            "format": "BC7_UNORM",
+            "generateMips": true,
+            "patterns": [
+                "*/textures/wpn/*",
+                "*/textures/rwap/*"
+            ]
+        },
+        {
+            "name": "Character / Hands",
+            "format": "BC7_UNORM",
+            "generateMips": true,
+            "patterns": [
+                "*/textures/act/*",
+                "*/textures/MK/*"
+            ]
+        },
+        {
+            "name": "Items",
+            "format": "BC3_UNORM",
+            "generateMips": true,
+            "patterns": [
+                "*/textures/items/*",
+                "*/textures/item/*",
+                "*/textures/usable_items/*",
+                "*/textures/farcry4/*",
+                "*/textures/artifact/*",
+                "*/textures/gwr/*"
+            ]
+        }
+    ]
 }
