@@ -45,12 +45,12 @@ func Run(ctx context.Context, texconvPath string, asset scan.Asset, format strin
 	}
 
 	actualFormat := format
-	success, stderr, runErr, after := runOnce(ctx, texconvPath, asset.Path, format, effectiveMaxSize, outputDir)
+	success, stderr, runErr, after := runOnce(ctx, texconvPath, asset.Path, format, generateMips, effectiveMaxSize, outputDir)
 
 	// BC7 fallback — only if ctx is still live (not a cancellation failure).
 	if !success && format == "BC7_UNORM" && ctx.Err() == nil {
 		actualFormat = "BC3_UNORM"
-		success, stderr, runErr, after = runOnce(ctx, texconvPath, asset.Path, "BC3_UNORM", effectiveMaxSize, outputDir)
+		success, stderr, runErr, after = runOnce(ctx, texconvPath, asset.Path, "BC3_UNORM", generateMips, effectiveMaxSize, outputDir)
 	}
 
 	if ctx.Err() != nil {
@@ -89,11 +89,20 @@ func Run(ctx context.Context, texconvPath string, asset scan.Asset, format strin
 	}
 }
 
-// runOnce executes a single texconv invocation and reports the outcome.
-func runOnce(ctx context.Context, texconvPath, inputPath, format string, maxTextureSize int, outputDir string) (success bool, stderr string, err error, after int64) {
+// texconvArgs builds the texconv command line. Kept separate from runOnce so the flags
+// can be asserted without executing texconv — generateMips was previously accepted by
+// Run and never reached this slice, which silently gave every profile a full mip chain.
+func texconvArgs(format string, generateMips bool, maxTextureSize int, outputDir, inputPath string) []string {
+	// -m 0 builds the full chain down to 1x1; -m 1 emits the top level only. UI, flares
+	// and reticles are drawn at a fixed size and never minified, so mips there are
+	// wasted space.
+	mips := "0"
+	if !generateMips {
+		mips = "1"
+	}
 	args := []string{
 		"-f", format,
-		"-m", "0",      // full mip chain
+		"-m", mips,
 		"-if", "CUBIC", // cubic interpolation for mip generation
 		"-gpu", "0",    // GPU accelerated compression, falls back to CPU if unavailable
 		"-y",           // overwrite
@@ -103,7 +112,12 @@ func runOnce(ctx context.Context, texconvPath, inputPath, format string, maxText
 	if maxTextureSize > 0 {
 		args = append(args, "-w", strconv.Itoa(maxTextureSize))
 	}
-	args = append(args, "--", inputPath)
+	return append(args, "--", inputPath)
+}
+
+// runOnce executes a single texconv invocation and reports the outcome.
+func runOnce(ctx context.Context, texconvPath, inputPath, format string, generateMips bool, maxTextureSize int, outputDir string) (success bool, stderr string, err error, after int64) {
+	args := texconvArgs(format, generateMips, maxTextureSize, outputDir, inputPath)
 
 	cmd := exec.Command(texconvPath, args...)
 	tools.SetProcAttr(cmd)

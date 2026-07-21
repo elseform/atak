@@ -146,10 +146,15 @@ overwrites it on subsequent launches.
 - `excludePatterns` — array of glob patterns. Matching rules:
   - Patterns **without** `/` match against the filename (basename) only
   - Patterns **containing** `/` match against the full relative path from the
-    mod root (e.g. `*/textures/ui/SquareDOV/*` excludes all files under that
-    directory regardless of which mod provides them)
+    mod root, and cover the whole subtree — `*/textures/ui/SquareDOV/*` excludes
+    every file under that directory at any depth, regardless of which mod
+    provides them. See [Pattern matching rules](#pattern-matching-rules)
   - Matching is case-insensitive on all platforms
-  - Files matching any pattern are never compressed regardless of profile match
+  - Evaluated **before** profile matching, so an entry here always beats a
+    profile pattern. A pattern listed both here and in a profile makes that
+    profile's copy unreachable
+  - Files matching any pattern are never compressed regardless of profile match,
+    and are reported as `Excluded`
 
 **Per profile:**
 - `name` — display name shown in scan results UI
@@ -200,16 +205,54 @@ overwrites it on subsequent launches.
   ```json
   "maxTextureSize": 1024
   ```
-- `exclude` — optional array of glob patterns. Files matching the profile's
-  `patterns` but also matching `exclude` are skipped. Use for exceptions
-  within a broad pattern.
+- `exclude` — optional array of glob patterns. A file matching this profile's
+  `patterns` **and** its `exclude` is **declined by this profile**, and matching
+  continues with the profiles after it. The file is not dropped.
+
+  This is the mechanism that routes exceptions to a better-suited profile:
+  Normal Maps declines `*scope*bump*` and `*lens_bump*`, so scope lens bumps fall
+  through to Scope Textures (BC7) rather than being flattened to two-channel BC5.
+  It only works because Normal Maps appears *before* Scope Textures — a decline
+  with no later match leaves the file `Unmatched`, which is surfaced in scan
+  results rather than silently discarded.
+
+  To drop a file outright, use the top-level `excludePatterns`. Those run before
+  profile matching and report the file as `Excluded`, so it stays visible in the
+  scan; a profile decline is silent by comparison.
 
 ### Pattern matching rules
 - `*` matches any sequence of characters except `/`
+- `?` matches a single character except `/`
 - Patterns without `/` are matched against the filename only (basename)
-- Patterns containing `/` are matched against the full relative path from modsDir
+- Patterns containing `/` are matched against the full relative path from the mod root
+- **A trailing `/*` is recursive** — it matches everything below that directory at
+  any depth, not just direct children. A bare trailing `/` is shorthand for the
+  same thing, so `*/textures/ui/` and `*/textures/ui/*` are equivalent
+- Patterns are anchored at both ends — a full match, not a substring search
 - Matching is case-insensitive on all platforms
 - More specific patterns must appear before general ones (first match wins)
+
+The recursive trailing `/*` (equivalently, a bare trailing `/`) is the one
+deliberate departure from plain `filepath.Match`, and it is what makes a
+path-based exclude usable: `*/textures/ui/SquareDOV/*` has to cover every file
+under that directory at any depth, regardless of which mod ships it. Everywhere
+else a star stays inside one path segment, so `*/textures/wpn/scope_*` matches
+`scope_30mm.dds` but not `scope_reticles/lens.dds`.
+
+All three pattern lists — a profile's `patterns`, a profile's `exclude`, and the
+top-level `excludePatterns` — share one implementation (`matchesPattern` in
+`internal/scan/walker.go`) so inclusion and exclusion cannot diverge. Previously
+inclusion matched by substring while exclusion used `filepath.Match`, which is
+how path excludes came to silently miss subtrees.
+
+Patterns are matched against the **mod-root-relative** path, so both walkers
+must normalize before matching: `WalkVirtual`'s `relPath` already has that shape,
+while `Walk`'s path is relative to `modsDir` and carries a leading mod-name
+segment that `modRelPath` strips. Skipping that step leaves an extra segment
+that no path pattern can match, silently routing everything to `Unmatched`.
+
+A backslash in a pattern always means a separator and is normalized to `/`,
+since patterns are authored rather than observed.
 
 ### Compression format quick reference
 
@@ -244,6 +287,13 @@ Mitigation:
 - BC7 correctly handles all 4 channels and is appropriate for complex
   metallic/reflective surfaces regardless of naming convention
 
+The two steps are one mechanism, not two independent ones: the `exclude` makes
+Normal Maps *decline* those files so they keep matching downward, and the Scope
+Textures profile is what catches them. Ordering is load-bearing — Scope Textures
+must come after Normal Maps to receive the declines, and the patterns must not
+also appear in the top-level `excludePatterns`, which would drop the files before
+any profile is consulted.
+
 When in doubt about a texture's channel usage, check with dds_analyze —
 `UNCOMPRESSED_RGBA` with a `_bump` suffix means BC5 is wrong for that texture.
 
@@ -252,169 +302,223 @@ with broadly correct STALKER conventions but users are expected to tune it:
 
 ```json
 {
-  "excludePatterns": [
-    "fx_sun*", "fx_*",
-    "*_lm.*", "*_cm.*", "*_nm2.*",
-    "*detail_map*", "*_hm.*",
-    "lut_*",
-    "*#small*",
-    "*cube#*",
-    "*_cube#*",
-    "*/textures/ui/SquareDOV/*",
-    "*scope*diff*"
-  ],
-  "profiles": [
-    {
-      "name": "UI Readables",
-      "format": "BC3_UNORM",
-      "generateMips": false,
-      "patterns": ["*/textures/ui/readables/*", "*/textures/ui/npe/*"]
-    },
-    {
-      "name": "Flares / FX",
-      "format": "BC3_UNORM",
-      "generateMips": false,
-      "patterns": ["*/textures/anamflares/*", "*/textures/flares/*"]
-    },
-    {
-      "name": "Normal Maps",
-      "format": "BC5_UNORM",
-      "generateMips": true,
-      "patterns": [
-        "*_bump.*", "*_bump#.*",
-        "*_normal.*", "*_nrm.*",
-        "*_nm.*", "*_nm_*",
-        "*_nmap.*", "*_norm.*", "*_norm_*",
-        "*nbump*", "*_normalbump*"
-      ],
-      "exclude": ["*scope*bump*", "*lens_bump*"]
-    },
-    {
-      "name": "UI / Icons",
-      "format": "BC7_UNORM",
-      "generateMips": false,
-      "patterns": ["*/textures/ui/*", "*_icons.*"]
-    },
-    {
-      "name": "Diffuse / Color",
-      "format": "BC3_UNORM",
-      "generateMips": true,
-      "patterns": [
-        "*_d.*", "*_diff.*", "*_diffuse.*",
-        "*_albedo.*", "*_base.*",
-        "*_col.*", "*_color.*", "*_co.*",
-        "*_c.*", "*_b.*", "*_rgb.*",
-        "*_details.*"
-      ]
-    },
-    {
-      "name": "Specular / Gloss",
-      "format": "BC3_UNORM",
-      "generateMips": true,
-      "patterns": ["*_spec.*", "*_gloss.*"]
-    },
-    {
-      "name": "Masks / Alpha",
-      "format": "BC3_UNORM",
-      "generateMips": true,
-      "patterns": ["*_mask.*", "*_alpha.*"]
-    },
-    {
-      "name": "Sky Textures",
-      "format": "BC3_UNORM",
-      "generateMips": true,
-      "patterns": ["*/textures/sky/*"]
-    },
-    {
-      "name": "Detail / Terrain",
-      "format": "BC3_UNORM",
-      "generateMips": true,
-      "patterns": ["*/textures/detail/*", "*/textures/terrain/*"]
-    },
-    {
-      "name": "Sights / Reticles",
-      "format": "BC3_UNORM",
-      "generateMips": false,
-      "patterns": [
-        "*/textures/wpn/scope_reticles/*",
-        "*/textures/bonus_sights/*",
-        "*crosshair*",
-        "*reticle*",
-        "*_reticle.*",
-        "*_crosshair.*"
-      ]
-    },
-    {
-      "name": "Scope Textures",
-      "format": "BC7_UNORM",
-      "generateMips": true,
-      "patterns": [
-        "*/textures/wpn/scope_*",
-        "*scope*diff*",
-        "*scope*bump*",
-        "*lens_bump*"
-      ]
-    },
-    {
-      "name": "Weapon Textures",
-      "format": "BC3_UNORM",
-      "generateMips": true,
-      "patterns": [
-        "*/textures/wpn/*",
-        "*/textures/rwap/*",
-        "wpn_crosshair*"
-      ]
-    },
-    {
-      "name": "Character / Hands",
-      "format": "BC3_UNORM",
-      "generateMips": true,
-      "patterns": ["*/textures/act/*", "*/textures/MK/*"]
-    },
-    {
-      "name": "Items",
-      "format": "BC3_UNORM",
-      "generateMips": true,
-      "patterns": [
-        "*/textures/items/*",
-        "*/textures/item/*",
-        "*/textures/usable_items/*",
-        "*/textures/farcry4/*",
-        "*/textures/artifact/*",
-        "*/textures/gwr/*"
-      ]
-    },
-    {
-      "name": "Custom UI",
-      "format": "BC3_UNORM",
-      "generateMips": false,
-      "patterns": ["*/textures/catsy/*"]
-    },
-    {
-      "name": "Particle / FX",
-      "format": "BC3_UNORM",
-      "generateMips": false,
-      "patterns": ["*/textures/semitone/*"]
-    }
-  ]
+    "_note": "Profile order matters — first match wins. Specific path patterns (ui/readables, flares) must precede general ones (ui/*, fx_*).",
+    "minFileSizeBytes": 1024,
+    "excludePatterns": [
+        "fx_sun*",
+        "fx_*",
+        "*_lm.*",
+        "*_cm.*",
+        "*_nm2.*",
+        "*detail_map*",
+        "*_hm.*",
+        "lut_*",
+        "*#small*",
+        "*cube#*",
+        "*_cube#*",
+        "*/textures/ui/SquareDOV/*"
+    ],
+    "profiles": [
+        {
+            "name": "UI Readables",
+            "format": "BC3_UNORM",
+            "generateMips": false,
+            "patterns": [
+                "*/textures/ui/readables/*",
+                "*/textures/ui/npe/*"
+            ]
+        },
+        {
+            "name": "Flares / FX",
+            "format": "BC3_UNORM",
+            "generateMips": false,
+            "patterns": [
+                "*/textures/anamflares/*",
+                "*/textures/flares/*"
+            ]
+        },
+        {
+            "name": "Particle / FX",
+            "format": "BC3_UNORM",
+            "generateMips": false,
+            "patterns": [
+                "*/textures/semitone/*"
+            ]
+        },
+        {
+            "name": "Normal Maps",
+            "format": "BC5_UNORM",
+            "generateMips": true,
+            "exclude": [
+                "*scope*bump*",
+                "*lens_bump*"
+            ],
+            "patterns": [
+                "*_bump.*",
+                "*_bump#.*",
+                "*_normal.*",
+                "*_nm.*",
+                "*_nmap.*",
+                "*_nrm.*",
+                "*_norm.*",
+                "*_norm_*",
+                "*nbump*",
+                "*_normalbump.*",
+                "*_nm_*"
+            ]
+        },
+        {
+            "name": "Custom UI",
+            "format": "BC3_UNORM",
+            "generateMips": false,
+            "patterns": [
+                "*/textures/catsy/*"
+            ]
+        },
+        {
+            "name": "UI / Icons",
+            "format": "BC3_UNORM",
+            "generateMips": false,
+            "patterns": [
+                "*/textures/ui/*",
+                "*_icons.*"
+            ]
+        },
+        {
+            "name": "Diffuse / Color",
+            "format": "BC3_UNORM",
+            "generateMips": true,
+            "exclude": [
+                "*scope*diff*"
+            ],
+            "patterns": [
+                "*_d.*",
+                "*_diff.*",
+                "*_diffuse.*",
+                "*_albedo.*",
+                "*_base.*",
+                "*_col.*",
+                "*_color.*",
+                "*_co.*",
+                "*_c.*",
+                "*_b.*",
+                "*_rgb.*",
+                "*_details.*"
+            ]
+        },
+        {
+            "name": "Specular / Gloss",
+            "format": "BC3_UNORM",
+            "generateMips": true,
+            "patterns": [
+                "*_spec.*",
+                "*_gloss.*"
+            ]
+        },
+        {
+            "name": "Masks / Alpha",
+            "format": "BC3_UNORM",
+            "generateMips": true,
+            "patterns": [
+                "*_mask.*",
+                "*_alpha.*"
+            ]
+        },
+        {
+            "name": "Sky Textures",
+            "format": "BC3_UNORM",
+            "generateMips": true,
+            "patterns": [
+                "*/textures/sky/*"
+            ]
+        },
+        {
+            "name": "Detail / Terrain",
+            "format": "BC3_UNORM",
+            "generateMips": true,
+            "patterns": [
+                "*/textures/detail/*",
+                "*/textures/terrain/*"
+            ]
+        },
+        {
+            "name": "Sights / Reticles",
+            "format": "BC3_UNORM",
+            "generateMips": false,
+            "patterns": [
+                "*/textures/wpn/scope_reticles/*",
+                "*/textures/bonus_sights/*",
+                "*crosshair*",
+                "*reticle*",
+                "*_reticle.*",
+                "*_crosshair.*"
+            ]
+        },
+        {
+            "name": "Scope Textures",
+            "format": "BC7_UNORM",
+            "generateMips": true,
+            "patterns": [
+                "*/textures/wpn/scope_*",
+                "*scope*diff*",
+                "*scope*bump*",
+                "*lens_bump*"
+            ]
+        },
+        {
+            "name": "Weapon Textures",
+            "format": "BC3_UNORM",
+            "generateMips": true,
+            "patterns": [
+                "*/textures/wpn/*",
+                "*/textures/rwap/*"
+            ]
+        },
+        {
+            "name": "Character / Hands",
+            "format": "BC3_UNORM",
+            "generateMips": true,
+            "patterns": [
+                "*/textures/act/*",
+                "*/textures/MK/*"
+            ]
+        },
+        {
+            "name": "Items",
+            "format": "BC3_UNORM",
+            "generateMips": true,
+            "patterns": [
+                "*/textures/items/*",
+                "*/textures/item/*",
+                "*/textures/usable_items/*",
+                "*/textures/farcry4/*",
+                "*/textures/artifact/*",
+                "*/textures/gwr/*"
+            ]
+        }
+    ]
 }
 ```
 
 Note on format choices:
-- **UI/Icons uses BC7** — UI textures frequently use smooth alpha gradients for
-  circular minimap masks, soft-edged HUD elements, and transparent overlays.
-  BC3's alpha compression (4 bits/pixel in 4x4 blocks) causes visible banding
-  and artifact borders on these. BC7 handles alpha gradients correctly. No
-  runtime performance cost — BCn decompresses in hardware at the same speed
-  regardless of format.
+- **UI/Icons uses BC3** — BC7 was tried here and reverted. UI textures do use
+  smooth alpha gradients that BC7 handles better in principle, but the category
+  is large (~350 files in a GAMMA install) and BC7 is CPU-only on Linux, so it
+  dominated compression time for a difference that is not visible on flat icon
+  art with hard alpha edges. Users who want it can set BC7 in their own
+  `profiles.json`; there is no runtime cost either way, since BCn decompresses in
+  hardware at the same speed regardless of format.
 - **Scope Textures use BC7** — scope bump textures often use all 4 RGBA channels
   for reflection/gloss data, not just XY normals. BC5 would destroy B and A.
+  This is the only BC7 profile in the defaults, and it stays affordable on Linux
+  because it covers a small number of files.
 - **Weapon Textures and Character/Hands use BC3** in `default.json` for Linux
   CPU performance. The `quality.json` profile upgrades these to BC7.
 
 Notes:
-- All profiles default to BC3_UNORM except Normal Maps (BC5 required for two-channel
-  normal data) — BC3 is safe, fast, and well-supported across all XRay engine versions
+- All profiles default to BC3_UNORM except Normal Maps (BC5, required for
+  two-channel normal data) and Scope Textures (BC7, required for 4-channel lens
+  data) — BC3 is safe, fast, and well-supported across all XRay engine versions
 - BC7_UNORM produces better quality for diffuse textures but is CPU-intensive on Linux
   (no GPU acceleration) and caused issues in testing — power users can change
   Diffuse/Color to BC7_UNORM in their profiles.json
@@ -710,8 +814,10 @@ textures to unsupported formats.
 
 #### Profile-Level Exclusions
 
-Profiles support an optional `exclude` array — filename patterns that match the
-profile's `patterns` but should be skipped:
+Profiles support an optional `exclude` array — patterns that match the profile's
+`patterns` but which this profile should **decline**. A declined file is not
+dropped; matching continues with the profiles below it, and only a file that
+reaches the end with no match becomes `Unmatched`.
 
 ```json
 {
@@ -719,9 +825,14 @@ profile's `patterns` but should be skipped:
   "format": "BC5_UNORM",
   "generateMips": true,
   "patterns": ["*_bump.*", "*_normal.*"],
-  "exclude": ["*_bump_detail.*", "*_lm.*"]
+  "exclude": ["*scope*bump*", "*lens_bump*"]
 }
 ```
+
+Here Normal Maps claims bump maps generally but hands scope and lens bumps to
+whichever later profile wants them — Scope Textures, at BC7. Declining is
+therefore a routing decision, not a skip. Use the top-level `excludePatterns`
+when the intent is genuinely "never compress this file".
 
 #### Global Exclusion Patterns
 
@@ -741,8 +852,9 @@ directories regardless of which mod provides them:
 }
 ```
 
-Matched against the filename (basename) before any profile matching. If a file
-matches `excludePatterns`, it is skipped and counted as "Excluded".
+Evaluated before any profile matching — against the basename for patterns without
+`/`, against the full mod-root-relative path for patterns containing one. If a
+file matches `excludePatterns`, it is skipped and counted as "Excluded".
 
 The embedded default `profiles.json` ships with conservative `excludePatterns`
 covering known engine-specific texture naming conventions in Anomaly.
@@ -761,8 +873,14 @@ unmatched — shown in the Unmatched bucket, never compressed.
 #### Scanner Exclusions
 
 Directory exclusions are user-configurable via `scanExclusions` in `config.json`.
-Value is a list of glob patterns matched against directory **names** (not full paths)
-using `filepath.Match`.
+They share the profiles.json pattern syntax: a pattern **without** a separator matches a
+directory (or mod) **name** anywhere, and a **path** pattern matches a directory's
+mod-root-relative path, so an exclusion can target a nested subtree and not only a
+top-level folder. The matched directory and everything beneath it is skipped — in the
+directory walk via `filepath.SkipDir`, and in mod-output mode by dropping the whole mod
+(name patterns) or every file under the directory (path patterns), so the two scan modes
+agree. Name matching is case-insensitive, as elsewhere in the pattern system. A path
+pattern names its directory in any of three equivalent forms: `dir`, `dir/`, `dir/*`.
 
 Default value shipped in config:
 ```json
@@ -770,13 +888,17 @@ Default value shipped in config:
 ```
 
 - `.*` — skips all hidden directories (e.g. `.Grok's Modpack Installer`, `.git`)
-- `downloads` / `Downloads` — skips the Anomaly/GAMMA downloads folder (both cases for Linux)
+- `downloads` / `Downloads` — skips the Anomaly/GAMMA downloads folder (both entries are
+  now redundant since matching is case-insensitive, but kept for clarity)
 - `G.A.M.M.A. UI` — skips the GAMMA UI mod directory. Compressing main menu assets
   causes excessive loading times — confirmed by community testing
 
 Note: SquareDOV minimap textures are excluded via `*/textures/ui/SquareDOV/*` in
 `excludePatterns` in `profiles.json` — path-based exclusion covers all mods that
-ship those textures regardless of mod name or number prefix.
+ship those textures regardless of mod name or number prefix. The same directory could
+instead be pruned entirely with `*/textures/ui/SquareDOV` in `scanExclusions`; the
+difference is that a profile exclude reports the files as Excluded, while a scan
+exclusion skips them silently before classification.
 
 Surfaced in the Settings screen as an editable list — users can add or remove patterns.
 

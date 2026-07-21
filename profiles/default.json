@@ -13,8 +13,7 @@
         "*#small*",
         "*cube#*",
         "*_cube#*",
-        "*/textures/ui/SquareDOV/*",
-        "*scope*diff*"
+        "*/textures/ui/SquareDOV/*"
     ],
     "profiles": [
         {
@@ -86,6 +85,9 @@
             "name": "Diffuse / Color",
             "format": "BC3_UNORM",
             "generateMips": true,
+            "exclude": [
+                "*scope*diff*"
+            ],
             "patterns": [
                 "*_d.*",
                 "*_diff.*",
