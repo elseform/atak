@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/noisethanks/atak/internal/compress"
 	"github.com/noisethanks/atak/internal/config"
 	"github.com/noisethanks/atak/internal/scan"
 	"github.com/noisethanks/atak/internal/tui/components"
@@ -60,6 +61,7 @@ func NewResults(data ScanResultData, cfg *config.Config) ResultsModel {
 			Width:          a.Width,
 			Height:         a.Height,
 			Compressed:     a.Compressed,
+			SourceMipCount: a.SourceMipCount,
 			VirtualRelPath: a.VirtualRelPath,
 		}
 		switch a.ProfileMatch {
@@ -208,15 +210,22 @@ func (m ResultsModel) buildJobs(scope int, selectedProfile, selectedMod string) 
 
 		var configured []ConfiguredGroup
 		for _, g := range filtered {
+			profileMips := mipsFor(g.ProfileName)
 			var paths, relPaths []string
+			var genMips []bool
 			for _, a := range g.Assets {
 				paths = append(paths, a.Path)
 				relPaths = append(relPaths, a.VirtualRelPath)
+				// Resolve the mip chain per file: the profile forces mips for world
+				// textures, but otherwise the source's own mip count decides, so a mipped
+				// flare or reticle keeps its chain while flat UI art stays single-level —
+				// unless StripMipsWhenDisabled makes generateMips:false authoritative.
+				genMips = append(genMips, compress.ShouldGenerateMips(profileMips, a.SourceMipCount, cfg.StripMipsWhenDisabled))
 			}
 			configured = append(configured, ConfiguredGroup{
 				ProfileName:    g.ProfileName,
 				Format:         g.SuggestedFmt,
-				GenerateMips:   mipsFor(g.ProfileName),
+				GenerateMips:   genMips,
 				MaxTextureSize: maxTextureSizeFor(g.ProfileName),
 				Paths:          paths,
 				RelPaths:       relPaths,

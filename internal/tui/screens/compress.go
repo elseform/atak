@@ -171,10 +171,16 @@ func buildJobs(data CompressJobData) []compress.Job {
 	var jobs []compress.Job
 	for _, g := range data.Groups {
 		for i, path := range g.Paths {
+			// GenerateMips is resolved per file and parallel to Paths; default to a full
+			// chain if the slices ever fall out of sync (safe for world textures).
+			genMips := true
+			if i < len(g.GenerateMips) {
+				genMips = g.GenerateMips[i]
+			}
 			job := compress.Job{
 				Asset:          scan.Asset{Path: path},
 				Format:         g.Format,
-				GenerateMips:   g.GenerateMips,
+				GenerateMips:   genMips,
 				MaxTextureSize: g.MaxTextureSize,
 				OutputDir:      filepath.Dir(path),
 			}

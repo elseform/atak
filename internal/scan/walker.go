@@ -23,6 +23,7 @@ type Asset struct {
 	HasAlpha       bool
 	ProfileMatch   string
 	SuggestedFmt   string
+	SourceMipCount int    // mip levels in the source DDS (1 = no chain); drives per-file mip policy
 	VirtualRelPath string // set by WalkVirtual: path relative to mod root (e.g. gamedata/textures/wpn/ak74.dds)
 }
 
@@ -83,14 +84,15 @@ func Walk(modsDir string, profiles []config.Profile, excludePatterns []string, e
 			// Global exclude check — runs before profile matching.
 			if matchAnyPattern(base, modRelSlash, excludePatterns) {
 				assets <- Asset{
-					Path:         path,
-					ModName:      modName,
-					CurrentFmt:   info.Format,
-					Width:        info.Width,
-					Height:       info.Height,
-					HasAlpha:     info.HasAlpha,
-					ProfileMatch: "Excluded",
-					Excluded:     true,
+					Path:           path,
+					ModName:        modName,
+					CurrentFmt:     info.Format,
+					Width:          info.Width,
+					Height:         info.Height,
+					HasAlpha:       info.HasAlpha,
+					ProfileMatch:   "Excluded",
+					Excluded:       true,
+					SourceMipCount: info.MipMapCount,
 				}
 				return nil
 			}
@@ -102,15 +104,16 @@ func Walk(modsDir string, profiles []config.Profile, excludePatterns []string, e
 			}
 
 			assets <- Asset{
-				Path:         path,
-				ModName:      modName,
-				CurrentFmt:   info.Format,
-				Compressed:   info.Compressed,
-				Width:        info.Width,
-				Height:       info.Height,
-				HasAlpha:     info.HasAlpha,
-				ProfileMatch: profileName,
-				SuggestedFmt: suggestedFmt,
+				Path:           path,
+				ModName:        modName,
+				CurrentFmt:     info.Format,
+				Compressed:     info.Compressed,
+				Width:          info.Width,
+				Height:         info.Height,
+				HasAlpha:       info.HasAlpha,
+				ProfileMatch:   profileName,
+				SuggestedFmt:   suggestedFmt,
+				SourceMipCount: info.MipMapCount,
 			}
 			return nil
 		})
@@ -191,6 +194,7 @@ func WalkVirtual(virtualFS map[string]string, modsDir string, profiles []config.
 					HasAlpha:       info.HasAlpha,
 					ProfileMatch:   "Excluded",
 					Excluded:       true,
+					SourceMipCount: info.MipMapCount,
 					VirtualRelPath: relPath,
 				}
 				continue
@@ -210,6 +214,7 @@ func WalkVirtual(virtualFS map[string]string, modsDir string, profiles []config.
 				HasAlpha:       info.HasAlpha,
 				ProfileMatch:   profileName,
 				SuggestedFmt:   suggestedFmt,
+				SourceMipCount: info.MipMapCount,
 				VirtualRelPath: relPath,
 			}
 		}

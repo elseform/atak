@@ -15,6 +15,38 @@ func argValue(args []string, flag string) (string, bool) {
 	return "", false
 }
 
+// TestShouldGenerateMips covers the per-file mip policy: a profile's generateMips:true
+// forces a chain regardless of source (world textures are always minified), while
+// generateMips:false defers to the source's own choice by default — keeping a chain when
+// the source shipped one and none when it didn't. The stripWhenDisabled preference flips
+// generateMips:false into an authoritative "strip", dropping even a mipped source's chain,
+// but never overrides generateMips:true. A source with a single level (mipMapCount 1, or a
+// malformed 0) counts as "no chain".
+func TestShouldGenerateMips(t *testing.T) {
+	tests := []struct {
+		name        string
+		profileMips bool
+		sourceMips  int
+		strip       bool
+		want        bool
+	}{
+		{"profile forces on, source flat", true, 1, false, true},     // world texture without source mips
+		{"profile forces on, source mipped", true, 11, false, true},  // world texture, source already mipped
+		{"profile forces on, strip ignored", true, 11, true, true},   // strip never overrides generateMips:true
+		{"profile off, source mipped", false, 11, false, true},       // moon flare: 11 mips preserved
+		{"profile off, source flat", false, 1, false, false},         // flat UI/flare: stays single-level
+		{"profile off, malformed zero", false, 0, false, false},      // 0 mip count treated as no chain
+		{"profile off, strip drops mipped", false, 11, true, false},  // setting on: authoritative strip
+		{"profile off, strip on, flat", false, 1, true, false},       // already flat, stays flat
+	}
+	for _, tt := range tests {
+		if got := ShouldGenerateMips(tt.profileMips, tt.sourceMips, tt.strip); got != tt.want {
+			t.Errorf("%s: ShouldGenerateMips(%v, %d, %v) = %v, want %v",
+				tt.name, tt.profileMips, tt.sourceMips, tt.strip, got, tt.want)
+		}
+	}
+}
+
 // TestTexconvArgsMips is the regression guard for a profile's generateMips reaching
 // texconv. The setting was plumbed correctly from profiles.json all the way to Run,
 // which accepted it as a parameter and never read it — runOnce hardcoded "-m 0", so the

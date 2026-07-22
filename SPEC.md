@@ -169,9 +169,28 @@ overwrites it on subsequent launches.
   - `BC7_UNORM` — high quality color + alpha. Best visual quality (1 byte/texel).
     GPU-accelerated on Windows, CPU-only on Linux (~40-60 min for large jobs).
     Best for: high quality diffuse, detailed character/weapon textures
-- `generateMips` — whether to generate a full mip chain during compression.
-  `true` for most textures (enables LOD). `false` for UI textures (displayed
-  at exact pixel size, mips waste space and can cause blurring)
+- `generateMips` — mip-chain **policy** for this profile, not an unconditional switch.
+  The effective per-file decision is resolved from each source DDS header by
+  `ShouldGenerateMips` in `internal/compress/texconv.go`. With the default settings it
+  is `profile.generateMips || sourceMipCount > 1`; the `stripMipsWhenDisabled` setting
+  (below) changes what `generateMips:false` means:
+  - `true` — **always** generate a full chain. Use for world textures (diffuse,
+    normal, weapon, terrain, sky) — they are minified with distance and need mips
+    even if a careless source shipped without them. Unaffected by `stripMipsWhenDisabled`.
+  - `false` — **preserve the source's own choice** (default): keep a full chain when
+    the source already had one, generate none when it did not. This is *not* a blanket
+    "strip mips" — a flare or scope reticle that ships with mips keeps them; flat UI art
+    without mips stays single-level. When the global `stripMipsWhenDisabled` setting is
+    on, `false` instead becomes an authoritative "strip": even a mipped source is
+    flattened to a single level (smaller output, at the cost of source fidelity).
+
+  This is why one profile can cover a directory whose sources disagree. In a real
+  GAMMA install ~1/3 of `anamflares` ship a mip chain (the moon flare has 11 levels
+  and renders as a distant billboard that *needs* them) while the rest ship one;
+  86% of scope reticles ship mips, 3% of UI icons do. No single static boolean is
+  correct for such a folder — the source decides. Stripping a mipped flare or
+  reticle to a single level makes it alias and read as a visibly wrong shade when
+  minified in-game, since the GPU can no longer pre-average the bright core.
 - `patterns` — array of glob patterns matched against filename OR full relative
   path. Path patterns must contain `/`. Order matters — first match wins.
   Examples:
@@ -964,8 +983,15 @@ remains — it is still needed to show the OperationScreen during compression.
   ```
   Note: `--` separator is required before input path — paths starting with `/`
   are interpreted as flags without it.
-  `-m 0` generates full mip chain if `generateMips == true` in profile,
-  or `-m 1` for no mips if `generateMips == false`
+  `-m 0` full mip chain / `-m 1` top level only. The choice is resolved **per file**,
+  not per profile: a profile's `generateMips:true` always yields `-m 0`, while
+  `generateMips:false` yields `-m 0` only when the source DDS already had a chain
+  (`mipMapCount > 1`) and `-m 1` otherwise. So a mipped source is never flattened and
+  a mipless world texture still gets a chain forced by its profile
+  (`ShouldGenerateMips`, resolved when jobs are built and threaded parallel to each
+  group's paths). The `stripMipsWhenDisabled` setting overrides the `generateMips:false`
+  branch to always yield `-m 1` (authoritative strip); `generateMips:true` is unaffected.
+  See the profiles.json `generateMips` field for the policy rationale.
   `-if CUBIC` cubic interpolation for mip generation (better quality)
   `-gpu 0` GPU accelerated compression (DirectX GPU on Windows, CPU fallback on Linux)
   `-nologo` suppress Microsoft header output
@@ -1133,6 +1159,12 @@ the Go process exits unexpectedly.
   - The backup system is the safety net; restore from backup if needed
   - Removes user confusion and config complexity
 - Scan exclusions — editable list of glob patterns, default: `[".*", "downloads", "Downloads"]`
+- **Strip mips when disabled** (`stripMipsWhenDisabled`) — bool toggle, default `false`.
+  When off, a profile's `generateMips:false` preserves a mipped source's chain (the
+  source decides). When on, `generateMips:false` becomes authoritative and strips the
+  chain to a single level regardless of source — smaller output at the cost of fidelity
+  for flares/reticles. Never affects `generateMips:true`. Settings screen label:
+  "Strip Mips When Disabled". Resolved in `compress.ShouldGenerateMips`.
 - Persist to `os.UserConfigDir()/atak/config.json`
 
 Full config.json schema:
@@ -1146,7 +1178,8 @@ Full config.json schema:
   "scanExclusions": [".*", "downloads", "Downloads", "G.A.M.M.A. UI"],
   "modOutputMode": false,
   "modOutputName": "ATAK",
-  "modlistPath": ""
+  "modlistPath": "",
+  "stripMipsWhenDisabled": false
 }
 ```
 
@@ -1170,6 +1203,7 @@ type Asset struct {
     HasAlpha    bool
     ProfileMatch string  // which profile matched, "" if none
     SuggestedFmt string  // "BC1_UNORM", "BC3_UNORM", etc.
+    SourceMipCount int   // mip levels in the source DDS (1 = no chain); drives per-file mip policy
 }
 
 // Result of one texconv invocation
