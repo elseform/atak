@@ -19,6 +19,7 @@ const (
 	fieldBackupDir
 	fieldWorkers
 	fieldBackupLevel
+	fieldStripMips     // bool toggle — no text input
 	fieldModOutputMode // bool toggle — no text input
 	fieldModOutputName // text input, shown only when ModOutputMode is on
 	fieldModlistPath   // text input, shown only when ModOutputMode is on
@@ -54,6 +55,8 @@ type SettingsModel struct {
 	errMsg        string
 	width         int
 	height        int
+	// stripMips mirrors cfg.StripMipsWhenDisabled while the toggle is being edited.
+	stripMips bool
 }
 
 func NewSettings(cfg *config.Config) SettingsModel {
@@ -86,6 +89,7 @@ func NewSettings(cfg *config.Config) SettingsModel {
 		cfg:           cfg,
 		inputs:        [6]textinput.Model{mods, backup, workers, backupLvl, modOutputName, modlistPath},
 		modOutputMode: cfg.ModOutputMode,
+		stripMips:     cfg.StripMipsWhenDisabled,
 		focused:       fieldModsDir,
 	}
 }
@@ -109,6 +113,10 @@ func (m SettingsModel) Update(msg tea.Msg) (SettingsModel, tea.Cmd) {
 		case " ":
 			if m.focused == fieldModOutputMode {
 				m.modOutputMode = !m.modOutputMode
+				return m, nil
+			}
+			if m.focused == fieldStripMips {
+				m.stripMips = !m.stripMips
 				return m, nil
 			}
 		case "esc", "q":
@@ -185,6 +193,7 @@ func (m SettingsModel) save() (SettingsModel, tea.Cmd) {
 	updated.ModOutputMode = m.modOutputMode
 	updated.ModOutputName = modOutputName
 	updated.ModlistPath = strings.TrimSpace(m.inputs[5].Value())
+	updated.StripMipsWhenDisabled = m.stripMips
 	return m, func() tea.Msg {
 		return NavigateMsg{To: NavSaveConfig, Data: &updated}
 	}
@@ -219,6 +228,22 @@ func (m SettingsModel) View() string {
 			b.WriteString(style.StyleMuted.Render(r.hint) + "\n")
 		}
 		b.WriteString("\n")
+	}
+
+	// Strip Mips When Disabled toggle.
+	{
+		toggleLabel := "Strip Mips When Disabled"
+		toggleValue := "[ off ]"
+		if m.stripMips {
+			toggleValue = style.StyleSuccess.Render("[ on  ]")
+		}
+		if m.focused == fieldStripMips {
+			b.WriteString(style.StyleSelected.Render(toggleLabel) + "\n")
+		} else {
+			b.WriteString(style.StyleBody.Render(toggleLabel) + "\n")
+		}
+		b.WriteString(toggleValue + "\n")
+		b.WriteString(style.StyleMuted.Render("When on, profiles with generateMips=false skip mips entirely, dropping any chain the\n  source shipped. When off (default), a mipped source keeps its chain (flares, reticles).") + "\n\n")
 	}
 
 	// Mod Output Mode toggle.

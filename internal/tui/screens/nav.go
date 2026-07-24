@@ -46,6 +46,7 @@ type assetRef struct {
 	Width          int
 	Height         int
 	Compressed     bool
+	SourceMipCount int    // mip levels in the source DDS; drives per-file mip policy
 	VirtualRelPath string // non-empty when sourced from WalkVirtual
 }
 
@@ -61,7 +62,7 @@ type CompressJobData struct {
 type ConfiguredGroup struct {
 	ProfileName    string
 	Format         string
-	GenerateMips   bool
+	GenerateMips   []bool // parallel to Paths; per-file mip decision (profile policy OR source has mips)
 	MaxTextureSize int
 	Paths          []string
 	RelPaths       []string // parallel to Paths; non-empty element = VirtualRelPath for that asset

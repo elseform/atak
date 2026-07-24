@@ -83,6 +83,7 @@ Default profiles cover the most common texture categories:
 |---|---|---|
 | Normal / bump maps | BC5 | `_bump`, `_normal`, `_nrm`, `_norm` suffixes |
 | Sights / Reticles | BC3 | `scope_reticles/`, `bonus_sights/`, `*crosshair*` |
+| Scope textures | BC7 | `*scope*diff*`, `*scope*bump*`, `*lens_bump*`, `*/textures/wpn/scope_*` |
 | UI / Icons | BC3 | `textures/ui/` path |
 | Diffuse / color | BC3 | `_diff`, `_base`, `_col`, `_d` suffixes |
 | Weapon textures | BC3 | `textures/wpn/`, `textures/rwap/` paths |
@@ -115,7 +116,7 @@ ATAK uses BCn block compression — a GPU-native format that decompresses in har
 
 **BC7 on Linux** is CPU-only — no GPU acceleration available. Expect 40-60 minutes for large jobs. For faster Linux compression, use BC3 for all profiles (the default). Quality difference is minimal at normal viewing distances.
 
-**Mip chains:** ATAK generates a full mip chain during compression using cubic filtering. This allows the engine to load lower-resolution versions of textures for distant objects, reducing effective VRAM usage further. Keep your in-game texture quality setting at High — lowering it on top of BCn compression will reduce visual quality unnecessarily.
+**Mip chains:** ATAK resolves mip generation per file. World-texture profiles (`generateMips: true`) always get a full chain built with cubic filtering, letting the engine load lower-resolution versions for distant objects and reducing effective VRAM further. Fixed-size art profiles (`generateMips: false`) follow the source instead — a texture that shipped with mips keeps them, one that didn't stays single-level. This matters for flares and scope reticles: many ship a mip chain and flattening them makes them alias and read as the wrong shade in-game. To force the old always-strip behavior for `generateMips: false`, enable `stripMipsWhenDisabled` in Settings. Keep your in-game texture quality setting at High — lowering it on top of BCn compression will reduce visual quality unnecessarily.
 
 ---
 
@@ -138,17 +139,19 @@ Config lives at:
   "scanExclusions": [".*", "downloads", "Downloads", "G.A.M.M.A. UI"],
   "modOutputMode": true,
   "modOutputName": "ATAK",
-  "modlistPath": "/path/to/MO2/profiles/Default/modlist.txt"
+  "modlistPath": "/path/to/MO2/profiles/Default/modlist.txt",
+  "stripMipsWhenDisabled": false
 }
 ```
 
 - `workerCount` — concurrent texconv processes (compression only). Each worker pegs one CPU core. Default: 1
 - `backupThreads` — 7-Zip thread count for backup/restore operations. Default: half your CPU threads
 - `backupLevel` — 7-Zip compression level 1-9. Default: 6
-- `scanExclusions` — directory names to skip during scan
+- `scanExclusions` — directories to skip during scan. A plain name (`downloads`, `.*`) matches a directory or mod name anywhere; a path pattern (`*/textures/ui/SquareDOV`) matches a nested directory, using the same pattern syntax as the profile lists above. The matched directory and everything under it is skipped
 - `modOutputMode` — non-destructive output mode. Default: true
 - `modOutputName` — output mod folder name. Default: "ATAK"
 - `modlistPath` — path to MO2 `modlist.txt`. Required when `modOutputMode` is true
+- `stripMipsWhenDisabled` — when true, profiles with `generateMips: false` strip mips entirely, dropping any chain the source shipped. When false (default), such a source keeps its chain (see `generateMips` below). Never affects `generateMips: true`. Toggle in Settings ("Strip Mips When Disabled")
 
 **Finding your modlist.txt:**
 - Usually at `<MO2 install>/profiles/<Profile Name>/modlist.txt`
@@ -177,20 +180,21 @@ Controls which textures get compressed and how. Created on first run from embedd
 
 **Top-level fields:**
 - `minFileSizeBytes` — skip files smaller than this. Default: 1024
-- `excludePatterns` — filename glob patterns never compressed regardless of profile match
+- `excludePatterns` — glob patterns never compressed regardless of profile match. Matched against the filename, or against the full path when the pattern contains `/`. These run *before* profile matching, so an entry here always beats a profile pattern
 
 **Per-profile fields:**
 - `name` — display name in scan results
 - `format` — compression format. See table above
-- `generateMips` — generate full mip chain. `true` for most textures, `false` for UI
+- `generateMips` — mip-chain **policy**, not an on/off switch. `true` forces a full chain — use for world textures (diffuse, normals, weapons, terrain, sky) that minify with distance. `false` **preserves the source's own choice**: a source that shipped mips (many flares, scope reticles) keeps its chain, one that didn't (most flat UI art) stays single-level. Set the `stripMipsWhenDisabled` config option to make `false` strip unconditionally instead
 - `maxTextureSize` — cap output resolution. `0` = no limit. Set to `1024` on sky/terrain profiles for 4GB VRAM cards. Textures smaller than this value are never upscaled
 - `patterns` — glob patterns matched against filename or full path
-- `exclude` — optional per-profile exclusions
+- `exclude` — optional. A file matching this profile's `patterns` **and** its `exclude` is declined by this profile, and matching continues with later profiles. Use it to route exceptions elsewhere — Normal Maps declines `*scope*bump*` so scope lens bumps fall through to Scope Textures (BC7) instead of being flattened to two-channel BC5. To drop a file outright, use the top-level `excludePatterns` instead
 
 **Pattern syntax:**
-- `*` matches any characters except `/`
+- `*` matches any characters except `/`; `?` matches a single character except `/`
 - Patterns without `/` match filename only: `*_bump.*` matches `rock_bump.dds`
-- Patterns with `/` match full path: `*/textures/wpn/*` matches any file under `textures/wpn/`
+- Patterns with `/` match full path: `*/textures/wpn/scope_*` matches `gamedata/textures/wpn/scope_30mm.dds`
+- **A trailing `/*` is recursive** — it covers the whole subtree, not just direct children. `*/textures/ui/SquareDOV/*` also excludes `textures/ui/SquareDOV/nested/file.dds`. A bare trailing `/` means the same thing, so `*/textures/ui/SquareDOV/` is equivalent
 - Matching is case-insensitive on all platforms
 - **Order matters — first match wins.** Put specific patterns before general ones
 
@@ -210,7 +214,9 @@ Benchmarks and feedback welcome — open a GitHub issue or post in the community
 
 ## Compression quality
 
-Default profiles use BC3 for all textures except Normal Maps (BC5). BC3 produces minimal visible quality loss at typical Anomaly viewing distances and compresses quickly on all platforms.
+Default profiles use BC3 for all textures except Normal Maps (BC5) and Scope Textures (BC7). BC3 produces minimal visible quality loss at typical Anomaly viewing distances and compresses quickly on all platforms.
+
+Scope Textures is the one BC7 profile in the defaults. Scope lens textures often pack reflection, gloss, and specular data across all four RGBA channels, so BC5 would discard blue and alpha and BC3 would band the gradients. It covers a small number of files, so the CPU cost on Linux stays bounded — see [Compression formats](#compression-formats) for the BC7 caveat.
 
 For higher quality weapon and character textures, copy `profiles/quality.json` from the repository to your config directory — this uses BC7 for weapons and characters. Recommended for Windows users with GPU acceleration.
 

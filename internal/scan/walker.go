@@ -4,7 +4,9 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/noisethanks/atak/internal/config"
 )
@@ -21,14 +23,16 @@ type Asset struct {
 	HasAlpha       bool
 	ProfileMatch   string
 	SuggestedFmt   string
+	SourceMipCount int    // mip levels in the source DDS (1 = no chain); drives per-file mip policy
 	VirtualRelPath string // set by WalkVirtual: path relative to mod root (e.g. gamedata/textures/wpn/ak74.dds)
 }
 
 // Walk traverses modsDir, emitting Asset values for every uncompressed .dds file found.
 // excludePatterns are globs from profiles.json — patterns without '/' match the basename,
 // patterns with '/' match the full path relative to the mod root. Matched files are emitted
-// with Excluded:true. exclusions are directory-name globs from config.json — matched
-// directories are skipped entirely.
+// with Excluded:true. exclusions are directory globs from config.json — a plain name
+// matches a directory anywhere, a path pattern matches its mod-root-relative path; a
+// matched directory and its whole subtree are skipped entirely.
 // Returns three channels: assets, skipped count (one value sent on completion), and errors.
 func Walk(modsDir string, profiles []config.Profile, excludePatterns []string, exclusions []string, minFileSizeBytes int) (<-chan Asset, <-chan int, <-chan error) {
 	assets := make(chan Asset, 256)
@@ -44,10 +48,9 @@ func Walk(modsDir string, profiles []config.Profile, excludePatterns []string, e
 				return nil // skip unreadable entries, keep walking
 			}
 			if d.IsDir() {
-				for _, pattern := range exclusions {
-					if matched, err := filepath.Match(pattern, d.Name()); err == nil && matched {
-						return filepath.SkipDir
-					}
+				rel, _ := filepath.Rel(modsDir, path)
+				if excludesDir(d.Name(), modRelPath(rel), exclusions) {
+					return filepath.SkipDir
 				}
 				return nil
 			}
@@ -74,51 +77,43 @@ func Walk(modsDir string, profiles []config.Profile, excludePatterns []string, e
 				return nil // variant folder with double gamedata path
 			}
 			modName := modNameFromRel(rel)
-			base := strings.ToLower(filepath.Base(path))
+			base := filepath.Base(path)
 
-			// mod-root-relative slash path for path-based excludePattern matching.
-			relSlash := filepath.ToSlash(rel)
-			var modRelSlash string
-			if idx := strings.Index(relSlash, "/"); idx >= 0 {
-				modRelSlash = relSlash[idx+1:]
-			} else {
-				modRelSlash = relSlash
-			}
+			modRelSlash := modRelPath(rel)
 
 			// Global exclude check — runs before profile matching.
-			if matchExcludePatterns(base, modRelSlash, excludePatterns) {
+			if matchAnyPattern(base, modRelSlash, excludePatterns) {
 				assets <- Asset{
-					Path:         path,
-					ModName:      modName,
-					CurrentFmt:   info.Format,
-					Width:        info.Width,
-					Height:       info.Height,
-					HasAlpha:     info.HasAlpha,
-					ProfileMatch: "Excluded",
-					Excluded:     true,
+					Path:           path,
+					ModName:        modName,
+					CurrentFmt:     info.Format,
+					Width:          info.Width,
+					Height:         info.Height,
+					HasAlpha:       info.HasAlpha,
+					ProfileMatch:   "Excluded",
+					Excluded:       true,
+					SourceMipCount: info.MipMapCount,
 				}
 				return nil
 			}
 
 			// Profile matching with per-profile exclusion.
-			profileName, suggestedFmt, profileExcluded := matchProfile(path, rel, profiles)
-			if profileExcluded {
-				return nil // silently skip — matched profile but caught by profile's exclude list
-			}
+			profileName, suggestedFmt := matchProfile(modRelSlash, profiles)
 			if profileName == "" {
 				profileName = "Unmatched"
 			}
 
 			assets <- Asset{
-				Path:         path,
-				ModName:      modName,
-				CurrentFmt:   info.Format,
-				Compressed:   info.Compressed,
-				Width:        info.Width,
-				Height:       info.Height,
-				HasAlpha:     info.HasAlpha,
-				ProfileMatch: profileName,
-				SuggestedFmt: suggestedFmt,
+				Path:           path,
+				ModName:        modName,
+				CurrentFmt:     info.Format,
+				Compressed:     info.Compressed,
+				Width:          info.Width,
+				Height:         info.Height,
+				HasAlpha:       info.HasAlpha,
+				ProfileMatch:   profileName,
+				SuggestedFmt:   suggestedFmt,
+				SourceMipCount: info.MipMapCount,
 			}
 			return nil
 		})
@@ -136,8 +131,11 @@ func Walk(modsDir string, profiles []config.Profile, excludePatterns []string, e
 // WalkVirtual scans a pre-built virtual filesystem map (relPath→absPath) instead of
 // walking a directory. Same classification logic as Walk. excludePatterns follow the
 // same path-aware rules as Walk — relPath (already mod-root-relative) is used directly.
-// Mod-level exclusions must be applied before calling by filtering the modList passed to BuildVirtualFS.
-func WalkVirtual(virtualFS map[string]string, modsDir string, profiles []config.Profile, excludePatterns []string, minFileSizeBytes int) (<-chan Asset, <-chan int, <-chan error) {
+// exclusions are the same directory globs Walk prunes with: name-only patterns must
+// already have removed whole mods from the modList passed to BuildVirtualFS (see
+// ExcludesMod), while path patterns are applied here per file, since a flat virtual FS
+// has no directory walk to prune.
+func WalkVirtual(virtualFS map[string]string, modsDir string, profiles []config.Profile, excludePatterns []string, exclusions []string, minFileSizeBytes int) (<-chan Asset, <-chan int, <-chan error) {
 	assets := make(chan Asset, 256)
 	skippedCh := make(chan int, 1)
 	errs := make(chan error, 1)
@@ -147,7 +145,11 @@ func WalkVirtual(virtualFS map[string]string, modsDir string, profiles []config.
 		var skipped int
 
 		for relPath, absPath := range virtualFS {
-			if strings.Count(filepath.ToSlash(relPath), "gamedata") > 1 {
+			relSlash := filepath.ToSlash(relPath)
+			if underExcludedDir(relSlash, exclusions) {
+				continue // inside a directory the scan excludes — pruned in Walk, skipped here
+			}
+			if strings.Count(relSlash, "gamedata") > 1 {
 				skipped++
 				continue // variant folder with double gamedata path
 			}
@@ -179,10 +181,10 @@ func WalkVirtual(virtualFS map[string]string, modsDir string, profiles []config.
 				continue
 			}
 
-			base := strings.ToLower(filepath.Base(absPath))
+			base := filepath.Base(absPath)
 
 			// Global exclude check — runs before profile matching.
-			if matchExcludePatterns(base, filepath.ToSlash(relPath), excludePatterns) {
+			if matchAnyPattern(base, relSlash, excludePatterns) {
 				assets <- Asset{
 					Path:           absPath,
 					ModName:        modName,
@@ -192,16 +194,13 @@ func WalkVirtual(virtualFS map[string]string, modsDir string, profiles []config.
 					HasAlpha:       info.HasAlpha,
 					ProfileMatch:   "Excluded",
 					Excluded:       true,
+					SourceMipCount: info.MipMapCount,
 					VirtualRelPath: relPath,
 				}
 				continue
 			}
 
-			// Profile matching uses relPath (relative to mod root, not modsDir).
-			profileName, suggestedFmt, profileExcluded := matchProfile(absPath, relPath, profiles)
-			if profileExcluded {
-				continue
-			}
+			profileName, suggestedFmt := matchProfile(relSlash, profiles)
 			if profileName == "" {
 				profileName = "Unmatched"
 			}
@@ -215,6 +214,7 @@ func WalkVirtual(virtualFS map[string]string, modsDir string, profiles []config.
 				HasAlpha:       info.HasAlpha,
 				ProfileMatch:   profileName,
 				SuggestedFmt:   suggestedFmt,
+				SourceMipCount: info.MipMapCount,
 				VirtualRelPath: relPath,
 			}
 		}
@@ -236,69 +236,171 @@ func modNameFromRel(rel string) string {
 	return rel
 }
 
+// modRelPath converts a modsDir-relative path into the mod-root-relative slash path that
+// every pattern is written against, by dropping the leading mod-name segment:
+// "Some Mod/gamedata/textures/ui/icon.dds" -> "gamedata/textures/ui/icon.dds".
+// WalkVirtual's relPath already has this shape; Walk's does not, and skipping this step
+// leaves an extra segment that no path pattern can match.
+func modRelPath(rel string) string {
+	relSlash := filepath.ToSlash(rel)
+	if idx := strings.Index(relSlash, "/"); idx >= 0 {
+		return relSlash[idx+1:]
+	}
+	return relSlash
+}
+
 // matchProfile returns the profile name and suggested format for the given file.
-// rel is the path relative to modsDir, used for path-based patterns like */textures/ui/*.
-// profileExcluded is true when the file matched a profile's patterns but was caught by
-// that profile's exclude list — caller should skip the file entirely (no emit).
-func matchProfile(path, rel string, profiles []config.Profile) (name, format string, profileExcluded bool) {
-	base := strings.ToLower(filepath.Base(path))
-	relSlash := strings.ToLower(filepath.ToSlash(rel))
+// relSlash must be mod-root-relative and slash-separated (gamedata/textures/ui/icon.dds),
+// since that is what path patterns like */textures/ui/* are written against; passing a
+// modsDir-relative path instead leaves an extra leading segment that no path pattern
+// will match.
+//
+// A profile's exclude list means that profile declines the file, not that the file is
+// dropped: matching continues with later profiles, so e.g. scope bump maps decline
+// Normal Maps (BC5 would discard their blue/alpha) and fall through to Scope Textures.
+// To drop a file outright, use the global excludePatterns instead — those are also
+// reported in the scan as Excluded, whereas a profile decline is silent.
+func matchProfile(relSlash string, profiles []config.Profile) (name, format string) {
+	base := filepath.Base(relSlash)
 	for _, p := range profiles {
-		matched := false
-		for _, pattern := range p.Patterns {
-			if m, _ := filepath.Match(strings.ToLower(pattern), base); m {
-				matched = true
-				break
-			}
-			if strings.Contains(pattern, "/") || strings.Contains(pattern, string(filepath.Separator)) {
-				stripped := strings.ToLower(strings.Trim(filepath.ToSlash(pattern), "*"))
-				if strings.Contains(relSlash, stripped) {
-					matched = true
-					break
-				}
-			}
+		if !matchAnyPattern(base, relSlash, p.Patterns) {
+			continue
 		}
-		if matched {
-			if matchPatterns(base, p.Exclude) {
-				return "", "", true
-			}
-			return p.Name, p.Format, false
+		if matchAnyPattern(base, relSlash, p.Exclude) {
+			continue // profile declines — keep looking
 		}
+		return p.Name, p.Format
 	}
-	return "", "", false
+	return "", ""
 }
 
-// matchPatterns reports whether base matches any of the given glob patterns.
-func matchPatterns(base string, patterns []string) bool {
-	for _, pattern := range patterns {
-		if m, _ := filepath.Match(strings.ToLower(pattern), base); m {
-			return true
-		}
+// pathPatternCache memoizes compiled path patterns; the same handful of patterns is
+// tested against every file in a scan.
+var pathPatternCache sync.Map // normalized pattern -> *regexp.Regexp
+
+// pathPatternRegexp compiles a path pattern into an anchored regexp.
+//
+// * and ? keep their usual glob meaning — neither crosses a separator, so * spans
+// one path segment. The single exception is a directory suffix: a trailing /*, or a
+// bare trailing / treated as shorthand for it, matches everything below that directory
+// at any depth, so */textures/ui/* and */textures/ui/ both cover
+// textures/ui/nested/file.dds. Without that, a directory pattern would only ever
+// reach direct children, which is what made path-based excludePatterns silently fail
+// to cover a subtree — and a bare-slash directory silently match nothing at all.
+func pathPatternRegexp(pattern string) *regexp.Regexp {
+	// Patterns are authored, not observed, so a backslash in one always means a
+	// separator — unlike a real path, where on Unix it is a legal filename character.
+	// filepath.ToSlash would only convert on Windows, leaving such a pattern inert here.
+	key := strings.ToLower(strings.ReplaceAll(pattern, `\`, `/`))
+	if v, ok := pathPatternCache.Load(key); ok {
+		return v.(*regexp.Regexp)
 	}
-	return false
+
+	dir, recursive := strings.CutSuffix(key, "/*")
+	if !recursive {
+		// A bare trailing / is shorthand for /* — the same recursive subtree match.
+		dir, recursive = strings.CutSuffix(dir, "/")
+	}
+
+	// QuoteMeta escapes every metacharacter, including * and ?, so putting those two
+	// back is all that separates a literal from a glob.
+	expr := regexp.QuoteMeta(dir)
+	expr = strings.ReplaceAll(expr, `\*`, `[^/]*`)
+	expr = strings.ReplaceAll(expr, `\?`, `[^/]`)
+	if recursive {
+		expr += `/.*`
+	}
+
+	re := regexp.MustCompile(`^` + expr + `$`)
+	pathPatternCache.Store(key, re)
+	return re
 }
 
-// matchesExcludePattern matches a single excludePattern entry against a file.
-// Patterns containing '/' are matched against the full mod-root-relative slash path;
-// patterns without '/' are matched against the basename only.
-func matchesExcludePattern(pattern, basename, relSlash string) bool {
-	if strings.Contains(pattern, "/") {
-		matched, _ := filepath.Match(
-			strings.ToLower(pattern),
-			strings.ToLower(filepath.ToSlash(relSlash)),
-		)
-		return matched
+// matchPathPattern matches a path pattern against a mod-root-relative slash path.
+func matchPathPattern(pattern, relSlash string) bool {
+	return pathPatternRegexp(pattern).MatchString(
+		strings.ToLower(filepath.ToSlash(relSlash)),
+	)
+}
+
+// matchesPattern matches one glob pattern against a file, and owns the case and
+// separator normalization for both sides. Patterns containing a separator are matched
+// against the mod-root-relative slash path; the rest match the basename.
+//
+// Every pattern list in profiles.json goes through here — a profile's patterns, a
+// profile's exclude, and the global excludePatterns — so a pattern means the same
+// thing wherever it is written. See SPEC.md for why they were unified.
+func matchesPattern(pattern, basename, relSlash string) bool {
+	if strings.ContainsAny(pattern, `/\`) {
+		return matchPathPattern(pattern, relSlash)
 	}
 	matched, _ := filepath.Match(strings.ToLower(pattern), strings.ToLower(basename))
 	return matched
 }
 
-// matchExcludePatterns reports whether the file matches any excludePattern entry.
-func matchExcludePatterns(basename, relSlash string, patterns []string) bool {
+// matchAnyPattern reports whether the file matches any pattern in the list.
+func matchAnyPattern(basename, relSlash string, patterns []string) bool {
 	for _, pattern := range patterns {
-		if matchesExcludePattern(pattern, basename, relSlash) {
+		if matchesPattern(pattern, basename, relSlash) {
 			return true
 		}
 	}
 	return false
+}
+
+// Directory exclusions (config.json's scanExclusions) share the profiles.json pattern
+// syntax: a pattern without a separator matches a directory or mod name, and a path
+// pattern matches the directory's mod-root-relative path, so an exclusion can target a
+// nested subtree (*/textures/ui/SquareDOV) and not just a top-level folder name. They
+// differ from file excludePatterns only in what they act on — a whole directory subtree
+// rather than a single file.
+
+// dirExclusionBase strips a path exclusion's optional recursive suffix — a trailing /*
+// or a bare trailing / — leaving the directory it designates. */textures/ui/SquareDOV,
+// its /-suffixed form and its /*-suffixed form all reduce to the same directory.
+func dirExclusionBase(pattern string) string {
+	p := strings.ReplaceAll(pattern, `\`, `/`)
+	if b, ok := strings.CutSuffix(p, "/*"); ok {
+		return b
+	}
+	return strings.TrimSuffix(p, "/")
+}
+
+// excludesDir reports whether a directory (its name plus its mod-root-relative path) is
+// selected for pruning by any exclusion pattern. A name-only pattern matches the
+// directory name; a path pattern matches the directory itself, and the walk then prunes
+// the whole subtree beneath it.
+func excludesDir(name, relSlash string, patterns []string) bool {
+	for _, p := range patterns {
+		if strings.ContainsAny(p, `/\`) {
+			if matchPathPattern(dirExclusionBase(p), relSlash) {
+				return true
+			}
+		} else if m, _ := filepath.Match(strings.ToLower(p), strings.ToLower(name)); m {
+			return true
+		}
+	}
+	return false
+}
+
+// underExcludedDir reports whether a file's mod-root-relative path lies inside a
+// directory named by a path exclusion. Name-only exclusions filter whole mods before the
+// virtual FS is built (see ExcludesMod), so only path patterns are relevant here — this
+// is how a nested-subtree exclusion is honored in mod-output mode, where there is no
+// directory walk to prune.
+func underExcludedDir(relSlash string, patterns []string) bool {
+	for _, p := range patterns {
+		if strings.ContainsAny(p, `/\`) && matchPathPattern(dirExclusionBase(p)+"/*", relSlash) {
+			return true
+		}
+	}
+	return false
+}
+
+// ExcludesMod reports whether a mod folder name is selected by any scan-exclusion
+// pattern, so the caller can drop that mod before building the virtual FS. A mod name is
+// a single path segment: name-only patterns match it, while path patterns (which target
+// nested directories) never match a bare mod name and are applied per file instead.
+func ExcludesMod(mod string, patterns []string) bool {
+	return excludesDir(mod, mod, patterns)
 }

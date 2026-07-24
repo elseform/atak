@@ -45,12 +45,12 @@ func Run(ctx context.Context, texconvPath string, asset scan.Asset, format strin
 	}
 
 	actualFormat := format
-	success, stderr, runErr, after := runOnce(ctx, texconvPath, asset.Path, format, effectiveMaxSize, outputDir)
+	success, stderr, runErr, after := runOnce(ctx, texconvPath, asset.Path, format, generateMips, effectiveMaxSize, outputDir)
 
 	// BC7 fallback — only if ctx is still live (not a cancellation failure).
 	if !success && format == "BC7_UNORM" && ctx.Err() == nil {
 		actualFormat = "BC3_UNORM"
-		success, stderr, runErr, after = runOnce(ctx, texconvPath, asset.Path, "BC3_UNORM", effectiveMaxSize, outputDir)
+		success, stderr, runErr, after = runOnce(ctx, texconvPath, asset.Path, "BC3_UNORM", generateMips, effectiveMaxSize, outputDir)
 	}
 
 	if ctx.Err() != nil {
@@ -89,11 +89,42 @@ func Run(ctx context.Context, texconvPath string, asset scan.Asset, format strin
 	}
 }
 
-// runOnce executes a single texconv invocation and reports the outcome.
-func runOnce(ctx context.Context, texconvPath, inputPath, format string, maxTextureSize int, outputDir string) (success bool, stderr string, err error, after int64) {
+// ShouldGenerateMips resolves the per-file mip decision from a profile's policy, the
+// source texture's own mip count, and the user's strip-when-disabled preference. A
+// profile's generateMips:true always forces a full chain — world textures (diffuse,
+// normal, weapon, terrain) are minified with distance and need mips even if a careless
+// source shipped without them. generateMips:false is where stripWhenDisabled decides.
+// Left off (the default) it preserves the source's own choice, keeping a chain when the
+// source already had one and generating none when it did not — which is what lets a single
+// profile cover a folder whose sources disagree, e.g. anamflares, where the moon flare
+// ships 11 mips and needs them while flat lens sprites ship one and don't. Turned on, it
+// makes generateMips:false authoritative and drops the source chain, restoring the strict
+// "drawn at a fixed size, never minified" behavior for anyone who wants smaller output
+// over source fidelity. It never overrides generateMips:true.
+func ShouldGenerateMips(profileGenerateMips bool, sourceMipCount int, stripWhenDisabled bool) bool {
+	if profileGenerateMips {
+		return true
+	}
+	if stripWhenDisabled {
+		return false
+	}
+	return sourceMipCount > 1
+}
+
+// texconvArgs builds the texconv command line. Kept separate from runOnce so the flags
+// can be asserted without executing texconv — generateMips was previously accepted by
+// Run and never reached this slice, which silently gave every profile a full mip chain.
+func texconvArgs(format string, generateMips bool, maxTextureSize int, outputDir, inputPath string) []string {
+	// -m 0 builds the full chain down to 1x1; -m 1 emits the top level only. The caller
+	// resolves generateMips per file via ShouldGenerateMips, so a mipped source is never
+	// flattened and a mipless world texture still gets a chain forced by its profile.
+	mips := "0"
+	if !generateMips {
+		mips = "1"
+	}
 	args := []string{
 		"-f", format,
-		"-m", "0",      // full mip chain
+		"-m", mips,
 		"-if", "CUBIC", // cubic interpolation for mip generation
 		"-gpu", "0",    // GPU accelerated compression, falls back to CPU if unavailable
 		"-y",           // overwrite
@@ -103,7 +134,12 @@ func runOnce(ctx context.Context, texconvPath, inputPath, format string, maxText
 	if maxTextureSize > 0 {
 		args = append(args, "-w", strconv.Itoa(maxTextureSize))
 	}
-	args = append(args, "--", inputPath)
+	return append(args, "--", inputPath)
+}
+
+// runOnce executes a single texconv invocation and reports the outcome.
+func runOnce(ctx context.Context, texconvPath, inputPath, format string, generateMips bool, maxTextureSize int, outputDir string) (success bool, stderr string, err error, after int64) {
+	args := texconvArgs(format, generateMips, maxTextureSize, outputDir, inputPath)
 
 	cmd := exec.Command(texconvPath, args...)
 	tools.SetProcAttr(cmd)

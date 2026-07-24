@@ -34,10 +34,18 @@ type Config struct {
 	BackupDir      string   `json:"backupDir"`
 	WorkerCount    int      `json:"workerCount"`
 	BackupLevel    int      `json:"backupLevel,omitempty"`
+	// ScanExclusions are directory globs pruned during the scan. A plain name matches a
+	// directory (or mod) anywhere; a path pattern like */textures/ui/SquareDOV matches a
+	// nested directory, sharing the profiles.json pattern syntax. A matched directory and
+	// its whole subtree are skipped.
 	ScanExclusions []string `json:"scanExclusions,omitempty"`
 	ModOutputMode  bool     `json:"modOutputMode"`
 	ModOutputName  string   `json:"modOutputName"`
 	ModlistPath    string   `json:"modlistPath"`
+	// StripMipsWhenDisabled makes a profile's generateMips:false authoritative: source mip
+	// chains are dropped instead of preserved. Off by default, where the source's own mip
+	// count decides for generateMips:false profiles (see compress.ShouldGenerateMips).
+	StripMipsWhenDisabled bool `json:"stripMipsWhenDisabled"`
 }
 
 func configDir() (string, error) {
