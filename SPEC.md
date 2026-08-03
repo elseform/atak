@@ -30,37 +30,10 @@ bin/
 macOS universal binaries contain both x86-64 and ARM64 slices — one binary covers
 all Mac hardware. No need to split darwin/amd64 and darwin/arm64 build tags.
 
-Build tag pattern — same variable name on all platforms, different file:
-
-```go
-//go:build linux
-
-//go:embed bin/texconv-linux
-var texconvBin []byte
-
-//go:embed bin/7zz
-var sevenZipBin []byte
-```
-
-```go
-//go:build windows
-
-//go:embed bin/texconv-windows.exe
-var texconvBin []byte
-
-//go:embed bin/7zz.exe
-var sevenZipBin []byte
-```
-
-```go
-//go:build darwin
-
-//go:embed bin/texconv-macos
-var texconvBin []byte
-
-//go:embed bin/7zz-macos
-var sevenZipBin []byte
-```
+Each platform has its own `embed_<platform>.go` with `//go:build` tag and
+`//go:embed` directives. All three use the same variable names (`texconvBin`,
+`sevenZipBin`) so the rest of the codebase is platform-agnostic. See
+`internal/tools/embed_linux.go` for the canonical pattern.
 
 On startup:
 1. Extract both binaries to `os.MkdirTemp`
@@ -104,7 +77,7 @@ one-time notice screen before proceeding to the main menu:
 │  Compression profiles created                       │
 │                                                     │
 │  A default profiles.json has been created at:       │
-│  ~/.config/atak/profiles.json                │
+│  ~/.config/atak/profiles.json                       │
 │                                                     │
 │  Edit this file to customize which textures get     │
 │  compressed and with which format. Changes take     │
@@ -120,6 +93,10 @@ The user owns `profiles.json` from this point forward — the tool never
 overwrites it on subsequent launches.
 
 ## profiles.json Format Reference
+
+The embedded default and the repo-root `profiles.json` are the canonical examples.
+See `profiles.json` at the repo root for current defaults, and
+`internal/config/configs/compression_profiles.json` for the embedded seed.
 
 ```json
 {
@@ -202,28 +179,30 @@ overwrites it on subsequent launches.
   Only applied when at least one dimension exceeds the limit — textures
   smaller than maxTextureSize are never upscaled.
 
-  Implementation notes:
-  - texconv's `-w -h` set exact dimensions — passing both forces a square
-    output, distorting non-square textures. Pass only `-w` — texconv scales
-    height proportionally to maintain aspect ratio.
-  - Guard against upscaling: only add `-w` when at least one dimension exceeds
-    maxTextureSize (`||` not `&&`)
+  Implementation: texconv's `-w` and `-h` flags set **exact** pixel dimensions,
+  not maximums — passing one without the other would distort non-square textures.
+  Both dimensions are computed explicitly before calling texconv, scaling by the
+  larger axis so neither exceeds `maxTextureSize`:
 
   ```go
-  // correct implementation
-  if maxTextureSize > 0 && (asset.Width > maxTextureSize || asset.Height > maxTextureSize) {
-      args = append(args, "-w", strconv.Itoa(maxTextureSize))
-      // do NOT pass -h — texconv maintains aspect ratio from -w alone
+  if asset.Width >= asset.Height {
+      targetW = maxTextureSize
+      targetH = int(math.Round(float64(asset.Height) * float64(maxTextureSize) / float64(asset.Width)))
+  } else {
+      targetH = maxTextureSize
+      targetW = int(math.Round(float64(asset.Width) * float64(maxTextureSize) / float64(asset.Height)))
   }
   ```
+
+  Both `-w` and `-h` are passed. Guard against upscaling: only enter this branch
+  when at least one dimension exceeds `maxTextureSize` (`||`, not `&&`). Guard
+  against division by zero: only enter when `asset.Width > 0 && asset.Height > 0`.
 
   Recommended use: set on Sky, Terrain, Detail profiles for 4GB VRAM cards.
   Do NOT use on Weapon or Character textures — quality loss is visible up close.
   Do NOT use on cubemap/LOD textures (`*#small*`, `*cube#*`) — texconv handles
   these incorrectly with resize flags, producing files 30x larger than the input.
-  ```json
-  "maxTextureSize": 1024
-  ```
+
 - `exclude` — optional array of glob patterns. A file matching this profile's
   `patterns` **and** its `exclude` is **declined by this profile**, and matching
   continues with the profiles after it. The file is not dropped.
@@ -316,210 +295,9 @@ any profile is consulted.
 When in doubt about a texture's channel usage, check with dds_analyze —
 `UNCOMPRESSED_RGBA` with a `_bump` suffix means BC5 is wrong for that texture.
 
-**The embedded default** (`configs/compression_profiles.json`) is the seed — it ships
-with broadly correct STALKER conventions but users are expected to tune it:
+**The embedded default** (`internal/config/configs/compression_profiles.json`,
+also at repo root as `profiles.json`) ships with broadly correct STALKER conventions:
 
-```json
-{
-    "_note": "Profile order matters — first match wins. Specific path patterns (ui/readables, flares) must precede general ones (ui/*, fx_*).",
-    "minFileSizeBytes": 1024,
-    "excludePatterns": [
-        "fx_sun*",
-        "fx_*",
-        "*_lm.*",
-        "*_cm.*",
-        "*_nm2.*",
-        "*detail_map*",
-        "*_hm.*",
-        "lut_*",
-        "*#small*",
-        "*cube#*",
-        "*_cube#*",
-        "*/textures/ui/SquareDOV/*"
-    ],
-    "profiles": [
-        {
-            "name": "UI Readables",
-            "format": "BC3_UNORM",
-            "generateMips": false,
-            "patterns": [
-                "*/textures/ui/readables/*",
-                "*/textures/ui/npe/*"
-            ]
-        },
-        {
-            "name": "Flares / FX",
-            "format": "BC3_UNORM",
-            "generateMips": false,
-            "patterns": [
-                "*/textures/anamflares/*",
-                "*/textures/flares/*"
-            ]
-        },
-        {
-            "name": "Particle / FX",
-            "format": "BC3_UNORM",
-            "generateMips": false,
-            "patterns": [
-                "*/textures/semitone/*"
-            ]
-        },
-        {
-            "name": "Normal Maps",
-            "format": "BC5_UNORM",
-            "generateMips": true,
-            "exclude": [
-                "*scope*bump*",
-                "*lens_bump*"
-            ],
-            "patterns": [
-                "*_bump.*",
-                "*_bump#.*",
-                "*_normal.*",
-                "*_nm.*",
-                "*_nmap.*",
-                "*_nrm.*",
-                "*_norm.*",
-                "*_norm_*",
-                "*nbump*",
-                "*_normalbump.*",
-                "*_nm_*"
-            ]
-        },
-        {
-            "name": "Custom UI",
-            "format": "BC3_UNORM",
-            "generateMips": false,
-            "patterns": [
-                "*/textures/catsy/*"
-            ]
-        },
-        {
-            "name": "UI / Icons",
-            "format": "BC3_UNORM",
-            "generateMips": false,
-            "patterns": [
-                "*/textures/ui/*",
-                "*_icons.*"
-            ]
-        },
-        {
-            "name": "Diffuse / Color",
-            "format": "BC3_UNORM",
-            "generateMips": true,
-            "exclude": [
-                "*scope*diff*"
-            ],
-            "patterns": [
-                "*_d.*",
-                "*_diff.*",
-                "*_diffuse.*",
-                "*_albedo.*",
-                "*_base.*",
-                "*_col.*",
-                "*_color.*",
-                "*_co.*",
-                "*_c.*",
-                "*_b.*",
-                "*_rgb.*",
-                "*_details.*"
-            ]
-        },
-        {
-            "name": "Specular / Gloss",
-            "format": "BC3_UNORM",
-            "generateMips": true,
-            "patterns": [
-                "*_spec.*",
-                "*_gloss.*"
-            ]
-        },
-        {
-            "name": "Masks / Alpha",
-            "format": "BC3_UNORM",
-            "generateMips": true,
-            "patterns": [
-                "*_mask.*",
-                "*_alpha.*"
-            ]
-        },
-        {
-            "name": "Sky Textures",
-            "format": "BC3_UNORM",
-            "generateMips": true,
-            "patterns": [
-                "*/textures/sky/*"
-            ]
-        },
-        {
-            "name": "Detail / Terrain",
-            "format": "BC3_UNORM",
-            "generateMips": true,
-            "patterns": [
-                "*/textures/detail/*",
-                "*/textures/terrain/*"
-            ]
-        },
-        {
-            "name": "Sights / Reticles",
-            "format": "BC3_UNORM",
-            "generateMips": false,
-            "patterns": [
-                "*/textures/wpn/scope_reticles/*",
-                "*/textures/bonus_sights/*",
-                "*crosshair*",
-                "*reticle*",
-                "*_reticle.*",
-                "*_crosshair.*"
-            ]
-        },
-        {
-            "name": "Scope Textures",
-            "format": "BC7_UNORM",
-            "generateMips": true,
-            "patterns": [
-                "*/textures/wpn/scope_*",
-                "*scope*diff*",
-                "*scope*bump*",
-                "*lens_bump*"
-            ]
-        },
-        {
-            "name": "Weapon Textures",
-            "format": "BC3_UNORM",
-            "generateMips": true,
-            "patterns": [
-                "*/textures/wpn/*",
-                "*/textures/rwap/*"
-            ]
-        },
-        {
-            "name": "Character / Hands",
-            "format": "BC3_UNORM",
-            "generateMips": true,
-            "patterns": [
-                "*/textures/act/*",
-                "*/textures/MK/*"
-            ]
-        },
-        {
-            "name": "Items",
-            "format": "BC3_UNORM",
-            "generateMips": true,
-            "patterns": [
-                "*/textures/items/*",
-                "*/textures/item/*",
-                "*/textures/usable_items/*",
-                "*/textures/farcry4/*",
-                "*/textures/artifact/*",
-                "*/textures/gwr/*"
-            ]
-        }
-    ]
-}
-```
-
-Note on format choices:
 - **UI/Icons uses BC3** — BC7 was tried here and reverted. UI textures do use
   smooth alpha gradients that BC7 handles better in principle, but the category
   is large (~350 files in a GAMMA install) and BC7 is CPU-only on Linux, so it
@@ -529,25 +307,16 @@ Note on format choices:
   hardware at the same speed regardless of format.
 - **Scope Textures use BC7** — scope bump textures often use all 4 RGBA channels
   for reflection/gloss data, not just XY normals. BC5 would destroy B and A.
-  This is the only BC7 profile in the defaults, and it stays affordable on Linux
-  because it covers a small number of files.
-- **Weapon Textures and Character/Hands use BC3** in `default.json` for Linux
-  CPU performance. The `quality.json` profile upgrades these to BC7.
-
-Notes:
-- All profiles default to BC3_UNORM except Normal Maps (BC5, required for
-  two-channel normal data) and Scope Textures (BC7, required for 4-channel lens
-  data) — BC3 is safe, fast, and well-supported across all XRay engine versions
-- BC7_UNORM produces better quality for diffuse textures but is CPU-intensive on Linux
-  (no GPU acceleration) and caused issues in testing — power users can change
-  Diffuse/Color to BC7_UNORM in their profiles.json
-- The BC7 → BC3 automatic fallback in texconv.go remains as a safety net for any
-  profile that uses BC7
-- Normal map patterns expanded to match bash script proven conventions
+  This is the only BC7 profile that stays small enough on Linux to be affordable.
+- **Weapon Textures, Character/Hands, and Diffuse/Color use BC7** — high visual
+  impact textures where quality matters. BC7 is GPU-accelerated on Windows and
+  stays manageable on Linux because these categories are smaller than UI.
+- The BC7 → BC3 automatic fallback in `texconv.go` remains as a safety net for
+  any profile that uses BC7.
 
 **Unmatched files** — DDS files that don't match any profile pattern are surfaced in
-scan results as a separate "Unmatched" bucket. The user can assign them a format
-manually in the Compression Config screen before compressing, or skip them entirely.
+scan results as a separate "Unmatched" bucket. They can be skipped or assigned a format
+manually in the Scan Results screen before compressing.
 
 **Community sharing** — users can share `profiles.json` files tuned for specific mod
 packs. The Settings screen shows the path to `profiles.json` and offers an
@@ -563,46 +332,54 @@ atak/
 ├── go.mod
 ├── go.sum
 ├── SPEC.md
+├── profiles.json                        # repo-root copy of current default profile
 ├── bin/
-│   ├── texconv
-│   └── 7zz
-├── configs/
-│   └── compression_profiles.json
-├── internal/
-│   ├── tools/
-│   │   └── embed.go         # binary extraction, EmbeddedTools struct
-│   ├── config/
-│   │   └── config.go        # load/save user config and profiles
-│   ├── scan/
-│   │   ├── walker.go        # walk mod directory or virtual FS, enumerate assets
-│   │   └── dds.go           # parse DDS headers, classify format
-│   ├── modlist/
-│   │   ├── parser.go        # parseModList() — reads MO2 modlist.txt
-│   │   └── virtual.go       # buildVirtualFS() — assembles virtual filesystem map
-│   ├── compress/
-│   │   ├── texconv.go       # exec.Command wrapper, arg builder
-│   │   └── worker.go        # goroutine pool, N concurrent jobs
-│   ├── archive/
-│   │   └── sevenzip.go      # backup, restore, list, verify via 7zz
-│   └── tui/
-│       ├── model.go         # top-level AppModel, screen enum, Init/Update/View
-│       ├── styles.go        # lipgloss theme (one place, no scattered styling)
-│       ├── components/
-│       │   ├── modpicker.go    # shared fuzzy mod picker (restore + compress)
-│       │   └── operation.go   # shared progress screen (backup/restore/verify/compress)
-│       └── screens/
-│           ├── welcome.go      # path config, first-run detection
-│           ├── firstrun.go     # one-time profiles.json creation notice
-│           ├── menu.go         # main menu hub (3 items: Scan, Backup, Settings)
-│           ├── about.go        # about + third-party licenses screen
-│           ├── backup.go       # backup manager — all archive ops including restore
-│           ├── scan.go         # scanning spinner + live counter
-│           ├── results.go      # scan results + compression launcher (enter/r/m)
-│           ├── compress.go     # execution screen using OperationScreen component
-│           └── summary.go      # completion stats, error list
-│           # restore.go removed — functionality absorbed into backup.go
-│           # compress_config.go removed — replaced by results.go keybindings
-└── SPEC.md                  # this file
+│   ├── texconv-linux / texconv-windows.exe / texconv-macos
+│   └── 7zz / 7zz.exe / 7zz-macos
+└── internal/
+    ├── tools/
+    │   ├── embed.go                     # EmbeddedTools struct, extraction, cleanup
+    │   ├── embed_linux.go               # //go:embed bin/texconv-linux, bin/7zz
+    │   ├── embed_windows.go             # //go:embed bin/texconv-windows.exe, bin/7zz.exe
+    │   ├── embed_darwin.go              # //go:embed bin/texconv-macos, bin/7zz-macos
+    │   ├── process_linux.go             # setProcAttr / killProcess — Linux/macOS
+    │   ├── process_windows.go           # setProcAttr / killProcess — Windows Job Objects
+    │   ├── lockfile.go                  # stale-process lockfile (Linux)
+    │   └── lockfile_stub.go             # no-op stubs (Windows/macOS)
+    ├── config/
+    │   ├── config.go                    # load/save user config and profiles
+    │   └── configs/
+    │       └── compression_profiles.json  # embedded default profiles seed
+    ├── scan/
+    │   ├── walker.go                    # walk mod directory or virtual FS, enumerate assets
+    │   └── dds.go                       # parse DDS headers, classify format
+    ├── modlist/
+    │   ├── parser.go                    # parseModList() — reads MO2 modlist.txt
+    │   └── virtual.go                   # buildVirtualFS() — assembles virtual filesystem map
+    ├── compress/
+    │   ├── texconv.go                   # exec.Command wrapper, arg builder, BC7 fallback
+    │   └── worker.go                    # goroutine pool, N concurrent jobs
+    ├── archive/
+    │   └── sevenzip.go                  # backup, restore, list, verify via 7zz
+    └── tui/
+        ├── model.go                     # top-level AppModel, screen enum, Init/Update/View
+        ├── style/
+        │   └── style.go                 # lipgloss theme (one place, no scattered styling)
+        ├── components/
+        │   ├── modpicker.go             # shared fuzzy mod picker (restore + compress)
+        │   └── operation.go             # shared progress screen (backup/restore/verify/compress)
+        └── screens/
+            ├── welcome.go               # path config, first-run detection
+            ├── firstrun.go              # one-time profiles.json creation notice
+            ├── menu.go                  # main menu hub
+            ├── about.go                 # about + third-party licenses screen
+            ├── backup.go                # backup manager — all archive ops including restore
+            ├── scan.go                  # scanning spinner + live counter
+            ├── nav.go                   # navigation helpers
+            ├── results.go               # scan results + compression launcher (enter/r/m)
+            ├── compress.go              # execution screen using OperationScreen component
+            ├── settings.go              # settings editor
+            └── summary.go              # completion stats, error list
 ```
 
 ---
@@ -631,9 +408,8 @@ The component accepts:
 - A channel of `OperationProgressMsg` (percent int, status string, size int64)
 - A cancel function
 
-All four operations (backup, restore, verify, compress) feed into this same
-component. This ensures consistent progress feedback across all operations and
-means verify gets a progress indicator for free.
+All four operations feed into this same component — consistent progress feedback
+across all operations, and verify gets a progress indicator for free.
 
 ---
 
@@ -653,44 +429,27 @@ Welcome / Path Config
    Scanning... (async, live counter)
         │
         ▼
-   Scan Results ────────────────────────────────────►─┐
-   [enter] Run Selected Profile                        │
-   [r]     Run All                                     │
-   [m]     Run Selected Mod → ModPicker → Compress     │
-   [q]     Main Menu                                   │
-        │                                              │
-        ▼                                              │
-   Compressing... (OperationScreen)                    │
-        │                                              │
-        ▼                                              │
-   Summary ─────────────────────────────────────────►─┘
-        │
-        └──────────────────────────────► Main Menu
-        │                               │
-   ┌────┴────────────────────────┐      │
-   │                             │      │
-   ▼                             ▼      │
-COMPRESS FLOW              BACKUP/RESTORE FLOW
-                                        │
-Scan (async, live counter)         Backup Manager
-        │                          ├── list existing backups
-        ▼                          ├── create new backup
-Scan Results                       └── delete old backups
-(grouped by profile)                        │
-        │                          Restore Mod
-        ▼                          ├── fuzzy search mod list
-Compression Config                 ├── confirm dialog
-(per-category override)            └── progress → done
+   Scan Results
+   [enter]  Run Selected Profile
+   [r]      Run All
+   [m]      Run Selected Mod → ModPicker → Compress
+   [q]      Main Menu
         │
         ▼
-Executing
-(progress bar, live log, error counter)
+   Compressing... (OperationScreen)
         │
         ▼
-Summary
-(stats, errors, retry option)
-        │
-        └──────────────────────────────►  Main Menu
+   Summary ──────────────────────────────────────► Main Menu
+```
+
+```
+Backup Manager
+├── list existing backups (size + date)
+├── Create New Backup → OperationScreen → done
+├── Restore Single Mod → ModPicker → confirm → OperationScreen → done
+├── Restore All → confirm → OperationScreen → done
+├── Verify Archive → OperationScreen → done
+└── Delete Backup → confirm → os.Remove
 ```
 
 ---
@@ -699,7 +458,7 @@ Summary
 
 ### 1. Backup Manager
 
-All archive operations live in one screen. No separate Restore screen.
+All archive operations live in one screen (`backup.go`). No separate Restore screen.
 
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -740,22 +499,17 @@ All archive operations live in one screen. No separate Restore screen.
 - **Verify Archive** — archive picker (if needed) → verify via `OperationScreen`
 - **Delete Backup** — archive picker (if needed) → confirmation → `os.Remove`
 
-- The separate `internal/tui/screens/restore.go` is removed — all restore
-  functionality lives in `backup.go`. The `ModPicker` component is reused.
 - Main menu has four items: Scan & Compress, Backup Manager, Settings, About
 
-- List existing backups in the Anomaly mods directory archive with size and date
 - Create a new LZMA solid archive of the full Anomaly mods directory via:
   ```
-  7zz a -t7z -m0=lzma2 -mx=6 -mfb=64 -md=32m -ms=on -mmt=<backupThreads> -bsp1 <output.7z> <mods_dir> -xr!downloads -xr!Downloads
+  7zz a -t7z -m0=lzma2 -mx=<backupLevel> -mfb=64 -md=32m -ms=on -bsp1 <output.7z> <mods_dir> -xr!downloads -xr!Downloads
   ```
-  - `-mx=6` — balanced compression, reasonable RAM usage
+  - `-mx=6` — default balanced compression; user-configurable 1-9 in Settings
   - `-mfb=64` — 64 fast bytes, well suited for binary/texture data
   - `-md=32m` — 32MB dictionary, keeps RAM usage sane on large mod lists
   - `-ms=on` — auto solid block sizing, let 7z decide
-  - `-mmt=<n>` — thread count from `cfg.BackupThreads`, default `max(2, NumCPU/2)`
   - `-xr!downloads`, `-xr!Downloads` — always exclude downloads folder, both cases for Linux case-sensitivity
-  - Compression level (`-mx`) and thread count (`-mmt`) are user-exposed (see Settings)
 - Parse 7zz `-bsp1` stderr progress into a Bubble Tea progress bar
 - Delete old backups with confirmation
 - Verify archive integrity via `7zz t`
@@ -767,13 +521,7 @@ explicitly choose to.
 
 ### 2. Restore
 
-Two restore modes accessible from the Restore screen:
-
-```
-Restore:
-  > Restore Single Mod   ← fuzzy mod picker, restores one mod
-    Restore All          ← full restore, no filter
-```
+Two restore modes accessible from the Backup Manager:
 
 **Restore Single Mod:**
 - Run `7zz l <archive>` and parse the file listing into a mod name list
@@ -871,12 +619,8 @@ directories regardless of which mod provides them:
 }
 ```
 
-Evaluated before any profile matching — against the basename for patterns without
-`/`, against the full mod-root-relative path for patterns containing one. If a
-file matches `excludePatterns`, it is skipped and counted as "Excluded".
-
-The embedded default `profiles.json` ships with conservative `excludePatterns`
-covering known engine-specific texture naming conventions in Anomaly.
+Evaluated before any profile matching. If a file matches `excludePatterns`, it is
+skipped and counted as "Excluded".
 
 **Counters on scan results screen:**
 - `___ to compress` — total files matched by profiles (excluding excluded files)
@@ -887,7 +631,6 @@ covering known engine-specific texture naming conventions in Anomaly.
 **Unknown format handling:**
 Files where the FourCC or DXGI format code is not recognized are treated as
 unmatched — shown in the Unmatched bucket, never compressed.
-
 
 #### Scanner Exclusions
 
@@ -931,13 +674,6 @@ Surfaced in the Settings screen as an editable list — users can add or remove 
   the smallest real usable texture (16x16 uncompressed RGBA) is ~1KB. Counted in the
   skipped total, not surfaced as errors. Users can lower this if they have legitimate
   tiny textures, or raise it to skip small textures entirely.
-  ```json
-  {
-    "minFileSizeBytes": 1024,
-    "excludePatterns": [...],
-    "profiles": [...]
-  }
-  ```
 
 ### 4. Compress
 
@@ -959,44 +695,32 @@ Scan Results keybindings:
 the scan results screen as a hint: "Press [m] to compress a single mod first".
 
 The mod picker for [m] uses the shared `ModPicker` component. On selection,
-assets are filtered to the chosen mod before passing to the worker pool:
-
-```go
-filtered := []scan.Asset{}
-for _, a := range allAssets {
-    if a.ModName == selectedMod {
-        filtered = append(filtered, a)
-    }
-}
-```
-
-`internal/tui/screens/compress_config.go` is deleted — its functionality is
-absorbed into `results.go` keybindings. The `compress.go` execution screen
-remains — it is still needed to show the OperationScreen during compression.
+assets are filtered to the chosen mod before passing to the worker pool.
 
 #### Compression Execution
 
-- Worker pool: `max(1, runtime.NumCPU()/2)` concurrent texconv processes
+- Worker pool: `workerCount` concurrent texconv processes (default 1, configurable in Settings)
 - Per-file texconv invocation:
   ```
-  texconv -f <FORMAT> -m 0 -if CUBIC -gpu 0 -y -nologo [-w <maxTextureSize>] -o <output_dir> -- <input_file>
+  texconv -f <FORMAT> -m 0|1 -if CUBIC -gpu 0 -y -nologo [-w <W> -h <H>] -o <output_dir> -- <input_file>
   ```
   Note: `--` separator is required before input path — paths starting with `/`
   are interpreted as flags without it.
+
   `-m 0` full mip chain / `-m 1` top level only. The choice is resolved **per file**,
-  not per profile: a profile's `generateMips:true` always yields `-m 0`, while
-  `generateMips:false` yields `-m 0` only when the source DDS already had a chain
-  (`mipMapCount > 1`) and `-m 1` otherwise. So a mipped source is never flattened and
-  a mipless world texture still gets a chain forced by its profile
-  (`ShouldGenerateMips`, resolved when jobs are built and threaded parallel to each
-  group's paths). The `stripMipsWhenDisabled` setting overrides the `generateMips:false`
-  branch to always yield `-m 1` (authoritative strip); `generateMips:true` is unaffected.
-  See the profiles.json `generateMips` field for the policy rationale.
+  not per profile, via `ShouldGenerateMips` in `internal/compress/texconv.go`:
+  a profile's `generateMips:true` always yields `-m 0`, while `generateMips:false`
+  yields `-m 0` only when the source DDS already had a chain (`mipMapCount > 1`)
+  and `-m 1` otherwise. So a mipped source is never flattened and a mipless world
+  texture still gets a chain forced by its profile. The `stripMipsWhenDisabled`
+  setting overrides the `generateMips:false` branch to always yield `-m 1`
+  (authoritative strip); `generateMips:true` is unaffected.
+
   `-if CUBIC` cubic interpolation for mip generation (better quality)
   `-gpu 0` GPU accelerated compression (DirectX GPU on Windows, CPU fallback on Linux)
   `-nologo` suppress Microsoft header output
-  `-w <n>` only added when `maxTextureSize > 0` — caps width, height scales
-  proportionally. Never applied when input is smaller than the limit.
+  `-w <W> -h <H>` only added when `maxTextureSize > 0` — both dimensions computed
+  explicitly to preserve aspect ratio (see `maxTextureSize` field above)
 
   Note: `-bc x` (quick BC7 encoder) intentionally removed. The exhaustive BC7
   encoder produces significantly better quality on metallic and reflective surfaces
@@ -1005,42 +729,25 @@ remains — it is still needed to show the OperationScreen during compression.
 
 - **BC7 → BC3 automatic fallback:** If texconv exits non-zero with BC7_UNORM,
   automatically retry with BC3_UNORM. Matches proven bash script behavior.
-  CompressionResult records the actual format used after fallback.
-
-
+  `CompressionResult` records the actual format used after fallback.
 
 - **Extension case preservation:** texconv lowercases the output extension by
   default — `texture.DDS` becomes `texture.dds`. On Linux (case-sensitive
   filesystem) this creates a second file, leaving the original uncompressed
   `.DDS` file untouched. Fix: after successful texconv run, if the output path
-  differs from the original asset path in case only, rename the output to match
-  the original filename exactly via `os.Rename`. This ensures the original file
-  is always overwritten regardless of extension case.
-  ```go
-  texconvOut := filepath.Join(outputDir,
-      strings.TrimSuffix(filepath.Base(asset.Path), ext) + ".dds")
-  if !strings.EqualFold(texconvOut, asset.Path) || texconvOut != asset.Path {
-      os.Rename(texconvOut, asset.Path)
-  }
-  ```
-- Capture stdout/stderr per file into `CompressionResult`
-- Emit `compressionDoneMsg` per file — adapted to feed shared `OperationScreen`
-  component with:
-  ```go
-  OperationProgressMsg{
-      Percent: (doneCount * 100) / totalCount,
-      Status:  filepath.Base(asset.Path),  // current file
-      Size:    totalBytesSaved,            // accumulated bytes saved
-      Done:    allWorkersFinished,
-  }
-  ```
+  differs from the original asset path, rename the output to match the original
+  filename exactly via `os.Rename`. Only applies in-place mode — in mod output
+  mode renaming to `asset.Path` would overwrite the source file.
+
+- Capture stderr per file into `CompressionResult`
+- Emit progress per file via `OperationProgressMsg{Percent, Status, Size, Done}`
 - Per-file errors accumulate separately and are shown on the summary screen —
-  individual file failures do not set `Err` on `OperationProgressMsg`
+  individual file failures do not abort the job
 - Uses shared `internal/tui/components/operation.go` for progress display —
   same spinner/size/elapsed UI as backup and restore
 - On completion: transition to summary screen with success count, error count,
   estimated VRAM delta
-- Error list is navigable; failed files can be retried
+- Error list is navigable; failed files are shown with their stderr output
 - No retry with different settings — if a file failed, fix profiles.json and rescan
 
 #### Cancellation
@@ -1051,12 +758,9 @@ All long-running operations (backup, restore, compress) must support Ctrl+C canc
   top-level model
 - The cancel function is called when Ctrl+C is pressed during an active operation
 - Workers receive the context and check `ctx.Done()` between files
-- Subprocess kill on cancellation — two steps required:
-  1. Set `cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}` when creating
-     the command — puts the subprocess in its own process group
-  2. On cancel: `syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)` — kills the
-     entire process group including any children 7zz or texconv may have spawned
-  3. `cmd.Wait()` after kill will return an error — swallow it as expected
+- Subprocess kill on cancellation — set `Setpgid: true` on start, then kill the
+  entire process group on cancel so any children 7zz or texconv may have spawned
+  are also killed. `cmd.Wait()` after kill returns an error — swallow it as expected
 - Partial output files are deleted on cancel
 - After cancellation, the app returns to the main menu with message: "Operation cancelled"
 - Ctrl+C on the main menu or any non-operational screen exits the app normally
@@ -1064,67 +768,21 @@ All long-running operations (backup, restore, compress) must support Ctrl+C canc
 
 #### Crash / Orphan Process Mitigation
 
-Platform-specific process management is split into build-tag files:
-- `internal/tools/process_linux.go` — `//go:build linux`
-- `internal/tools/process_windows.go` — `//go:build windows`
+Platform-specific process management in `internal/tools/process_<platform>.go`.
+All platforms expose the same interface: `SetProcAttr(cmd)`, `KillProcess(cmd)`,
+`NewJob()` / `AssignJob()` / `CloseJob()`.
 
-Both expose the same interface:
-```go
-func killProcess(cmd *exec.Cmd)   // kill subprocess on cancel
-func setProcAttr(cmd *exec.Cmd)   // set process attributes before Start()
-```
+**Linux/macOS** (`process_linux.go`, `//go:build linux || darwin`):
+- `SetProcAttr` sets `Setpgid: true` — subprocess gets its own process group
+- `KillProcess` sends `SIGKILL` to the entire process group (`-pid`)
+- Crash mitigation via lockfile (`lockfile.go`): write PID on start, delete on
+  clean exit, kill stale PID on next startup. `lockfile_stub.go` no-ops this on Windows.
 
-**Linux:**
-- `setProcAttr` sets `cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}`
-- `killProcess` uses `syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)` to kill
-  the entire process group
-- Crash mitigation via lockfile:
-  - On operation start: write `~/.config/atak/atak.lock` with PID
-  - On clean end: delete lockfile
-  - On startup: check for stale lockfile, kill stale PID, log warning
-  - Lockfile lives in `internal/tools/lockfile.go` (Linux build tag only)
-
-**Windows:**
-- `setProcAttr` creates a Windows Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`
-- After `cmd.Start()`, assign subprocess to the Job Object via `AssignProcessToJobObject`
-- When Go process exits (clean or crash), Windows automatically kills all job members
-- `killProcess` calls `cmd.Process.Kill()` directly for the cancel case
-- `CheckStaleLock()` is a no-op on Windows — Job Objects make lockfile unnecessary
-- Uses `golang.org/x/sys/windows` package (~40 lines total)
-
-```go
-// process_windows.go outline
-func setProcAttr(cmd *exec.Cmd) (windows.Handle, error) {
-    job, err := windows.CreateJobObject(nil, nil)
-    if err != nil {
-        return 0, err
-    }
-    info := windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION{}
-    info.BasicLimitInformation.LimitFlags = windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-    windows.SetInformationJobObject(job,
-        windows.JobObjectExtendedLimitInformation,
-        uintptr(unsafe.Pointer(&info)),
-        uint32(unsafe.Sizeof(info)))
-    return job, nil
-}
-
-func assignToJob(job windows.Handle, cmd *exec.Cmd) {
-    handle, _ := windows.OpenProcess(
-        windows.PROCESS_ALL_ACCESS, false,
-        uint32(cmd.Process.Pid))
-    windows.AssignProcessToJobObject(job, handle)
-    windows.CloseHandle(handle)
-}
-
-func killProcess(cmd *exec.Cmd) {
-    cmd.Process.Kill()
-}
-```
-
-Job handle is created before `cmd.Start()`, subprocess assigned after. Handle
-is stored in the operation context and closed on operation completion — the
-`KILL_ON_JOB_CLOSE` flag means closing the handle kills the subprocess if
-the Go process exits unexpectedly.
+**Windows** (`process_windows.go`):
+- `SetProcAttr` creates a Windows Job Object with `KILL_ON_JOB_CLOSE` — when the
+  Go process exits (clean or crash), Windows automatically kills all job members
+- `KillProcess` calls `cmd.Process.Kill()` for the explicit cancel case
+- No lockfile needed — Job Objects provide crash cleanup automatically
 
 ### 5. Settings
 
@@ -1145,20 +803,12 @@ the Go process exits unexpectedly.
   - Validated on input — reject values outside 1-9, non-numeric input reverts to previous value
   - All other 7z flags (`-mfb=64 -md=32m -ms=on -xr!downloads -xr!Downloads`) are hardcoded, not user-exposed
 - **Compression workers** (`workerCount`) — concurrent texconv processes.
-  Default: `max(1, runtime.NumCPU()/4)`. Each worker pegs one CPU core.
-  This setting applies to texconv only, not 7-Zip.
+  Default: 1. Each worker pegs one CPU core. This setting applies to texconv only, not 7-Zip.
   Settings screen label: "Compression workers (texconv)"
-
-- **Backup threads** (`backupThreads`) — 7-Zip internal thread count via `-mmt`.
-  Default: `max(2, runtime.NumCPU()/2)`. 7-Zip is I/O-bound and benefits from
-  more threads than texconv. Without this setting, 7-Zip uses all available
-  threads by default which can cause high CPU during backups.
-  Settings screen label: "Backup threads (7-Zip)"
-  Passed to 7-Zip as `-mmt=<n>` in all archive operations (backup, restore, verify).
 - Compression is always in-place — no staging directory option
   - The backup system is the safety net; restore from backup if needed
   - Removes user confusion and config complexity
-- Scan exclusions — editable list of glob patterns, default: `[".*", "downloads", "Downloads"]`
+- Scan exclusions — editable list of glob patterns, default: `[".*", "downloads", "Downloads", "G.A.M.M.A. UI"]`
 - **Strip mips when disabled** (`stripMipsWhenDisabled`) — bool toggle, default `false`.
   When off, a profile's `generateMips:false` preserves a mipped source's chain (the
   source decides). When on, `generateMips:false` becomes authoritative and strips the
@@ -1167,13 +817,12 @@ the Go process exits unexpectedly.
   "Strip Mips When Disabled". Resolved in `compress.ShouldGenerateMips`.
 - Persist to `os.UserConfigDir()/atak/config.json`
 
-Full config.json schema:
+Full config.json schema (see `internal/config/config.go` for canonical struct):
 ```json
 {
   "modsDir": "/home/user/Anomaly/mods",
   "backupDir": "/home/user/Anomaly/backup",
   "workerCount": 1,
-  "backupThreads": 4,
   "backupLevel": 6,
   "scanExclusions": [".*", "downloads", "Downloads", "G.A.M.M.A. UI"],
   "modOutputMode": false,
@@ -1189,43 +838,6 @@ virtual filesystem approach — see Mod Output Mode section.
 
 ---
 
-## Data Structures
-
-```go
-// Core asset record produced by scan
-type Asset struct {
-    Path        string
-    ModName     string
-    CurrentFmt  string   // from DDS header: "DXT1", "DXT5", "R8G8B8", etc.
-    Compressed  bool
-    Width       int
-    Height      int
-    HasAlpha    bool
-    ProfileMatch string  // which profile matched, "" if none
-    SuggestedFmt string  // "BC1_UNORM", "BC3_UNORM", etc.
-    SourceMipCount int   // mip levels in the source DDS (1 = no chain); drives per-file mip policy
-}
-
-// Result of one texconv invocation
-type CompressionResult struct {
-    Asset   Asset
-    Success bool
-    Err     error
-    Stderr  string
-    Before  int64  // bytes
-    After   int64
-}
-
-// Bubble Tea messages
-type assetFoundMsg      struct{ asset Asset }
-type scanCompleteMsg    struct{ total int; skipped int }
-type compressionDoneMsg struct{ result CompressionResult }
-type archiveProgressMsg struct{ percent int; currentFile string }
-type archiveDoneMsg     struct{ err error }
-```
-
----
-
 ## Bubble Tea Conventions
 
 These must be followed consistently or the architecture drifts:
@@ -1234,7 +846,7 @@ These must be followed consistently or the architecture drifts:
 - All I/O happens in `Cmd` functions that return a `Msg`.
 - Sub-screens each have their own `Model`, `Update`, and `View`.
 - Top-level `AppModel` delegates to the active screen's Update/View.
-- All styling is in `tui/styles.go` via lipgloss. No inline color strings elsewhere.
+- All styling is in `tui/style/style.go` via lipgloss. No inline color strings elsewhere.
 - Screen transitions happen by returning a new screen enum value from Update.
   The top-level model swaps the active screen on the next render cycle.
 
@@ -1243,55 +855,25 @@ These must be followed consistently or the architecture drifts:
 Scan results must persist in `AppModel`, not in `ResultsModel`. This prevents
 state loss when navigating away from and back to the results screen.
 
-```go
-// AppModel holds scan state at the top level
-type AppModel struct {
-    // ...
-    scanAssets  []scan.Asset  // persisted after scan completes
-    scanSkipped int           // persisted after scan completes
-}
-```
-
-When navigating back to results, reconstruct `ResultsModel` from `AppModel.scanAssets`
-and `AppModel.scanSkipped` — never lose scan data on screen transition.
-
-`ResultsModel` is a view over the data, not the owner of it.
+`ResultsModel` is a view over the data, not the owner of it. When navigating
+back to results, reconstruct `ResultsModel` from `AppModel.scanAssets` and
+`AppModel.scanSkipped` — never lose scan data on screen transition.
 
 ---
 
 ## About / Licenses Screen
 
-Accessible from the main menu. Displays:
+Accessible from the main menu (`internal/tui/screens/about.go`). Displays version,
+project URL, and a scrollable section with all third-party licenses:
+1. texconv (Texconv-Custom-DLL) — MIT
+2. 7-Zip — LGPL v2.1
+3. Charmbracelet UI dependencies (bubbletea, bubbles, lipgloss) — MIT
 
-```
-┌─────────────────────────────────────────────────────┐
-│  atak v<version>                             │
-│                                                     │
-│  A texture compression and backup utility for       │
-│  S.T.A.L.K.E.R. Anomaly modlists.                            │
-│                                                     │
-│  github.com/noisethanks/atak                 │
-│                                                     │
-│  ── Third-Party Licenses ──────────────────────     │
-│                                                     │
-│  <scrollable content of THIRD_PARTY_LICENSES.txt>  │
-│                                                     │
-│  ↑↓ scroll   q/esc back                            │
-└─────────────────────────────────────────────────────┘
-```
+This satisfies matyalatte's redistribution requirement — license notice is
+present in the distributed binary's about screen.
 
-Implementation notes:
-- Version string injected at build time via `-ldflags "-X main.version=v0.1.0"`
-- License content is hardcoded in `about.go` — no separate file embedding needed
-- All licenses displayed in one scrollable section in this order:
-  1. texconv (Texconv-Custom-DLL) — MIT + contents of THIRD_PARTY_LICENSES.txt
-  2. 7-Zip — LGPL v2.1
-  3. Charmbracelet UI dependencies (bubbletea, bubbles, lipgloss) — MIT
-- This satisfies matyalatte's redistribution requirement — license notice is
-  present in the distributed binary's about screen
-- License text is scrollable via `↑↓` / `j k`
-- `q` or `esc` returns to main menu
-- Implemented as `internal/tui/screens/about.go`
+Version string injected at build time via `-ldflags "-X main.version=v0.1.0"`.
+In development builds without the flag, version displays as `dev`.
 
 ---
 
@@ -1336,15 +918,6 @@ mods/                            mods/
 ### Configuration
 
 New fields in `config.json`:
-
-```json
-{
-  "modOutputMode": false,
-  "modOutputName": "ATAK",
-  "modlistPath": "/path/to/MO2/profiles/Default/modlist.txt"
-}
-```
-
 - `modOutputMode` — enable/disable. Default false (in-place mode)
 - `modOutputName` — name of the output mod folder. Default "ATAK".
   Created as `<modsDir>/<modOutputName>/`
@@ -1356,46 +929,25 @@ New fields in `config.json`:
 MO2's modlist.txt format:
 ```
 +High Priority Mod
-+Medium Priority Mod  
++Medium Priority Mod
 -Disabled Mod
 +Low Priority Mod
 ```
 
-- `+` prefix = enabled
-- `-` prefix = disabled
+- `+` prefix = enabled, `-` prefix = disabled
 - Order = priority (FIRST line = highest priority in MO2)
 
-Parsing:
-1. Read file, split on newlines, trim whitespace
-2. Filter to lines starting with `+`
-3. Strip `+` prefix to get mod names
-4. Do NOT reverse — modlist.txt already lists high priority first
-5. Return `[]string` of enabled mod names in priority order (high → low)
+Parsing: read file, filter to `+` lines, strip `+` prefix, do NOT reverse —
+modlist.txt already lists high priority first. Return `[]string` of enabled mod
+names in priority order (high → low). See `internal/modlist/parser.go`.
 
 ### Virtual filesystem
 
-```go
-func buildVirtualFS(modsDir string, modList []string) map[string]string {
-    // map[relPath]absoluteSourcePath
-    // iterate high→low priority, lower priority overwrites
-    // (so high priority mods win — they are processed last, overwriting lower ones)
-    virtual := map[string]string{}
-    for i := len(modList)-1; i >= 0; i-- {
-        modPath := filepath.Join(modsDir, modList[i])
-        filepath.WalkDir(modPath, func(path string, d fs.DirEntry, err error) error {
-            if !d.IsDir() {
-                rel, _ := filepath.Rel(modPath, path)
-                virtual[rel] = path
-            }
-            return nil
-        })
-    }
-    return virtual
-}
-```
-
-Result: flat map of `relPath → winning source file`. Passed to the scanner
-instead of walking the mods directory directly.
+`buildVirtualFS` in `internal/modlist/virtual.go` builds a flat
+`map[relPath]absoluteSourcePath` by iterating the mod list from low to high
+priority, so higher-priority mods overwrite lower-priority entries for the same
+relative path. Result: every key maps to the winning (highest-priority) source
+file. Passed to the scanner instead of walking the mods directory directly.
 
 ### Output structure
 
@@ -1454,17 +1006,7 @@ New fields in Settings:
 - **Mod Output Mode** toggle (on/off)
 - **Output mod name** text field (default "ATAK"), shown when toggle is on
 - **MO2 modlist.txt path** text field, shown when toggle is on
-  - "Browse" or manual path entry
   - Shows warning if file not found
-
-### New files
-
-```
-internal/
-└── modlist/
-    ├── parser.go      # parseModList() — reads and parses modlist.txt
-    └── virtual.go     # buildVirtualFS() — assembles virtual filesystem map
-```
 
 ### Fallback behavior
 
@@ -1476,32 +1018,18 @@ If `modlistPath` is empty or the file cannot be read:
 
 ---
 
-## Community Profiles Directory
+## Community Profiles
 
-A `profiles/` directory in the repo root serves as a community resource for
-curated profile configurations. Ships with two official profiles:
+`profiles.json` at the repo root is the current recommended default — it uses BC7 for
+Weapon Textures, Character/Hands, and Diffuse/Color, and is also the embedded seed
+that ships in the binary (`internal/config/configs/compression_profiles.json`).
 
-```
-profiles/
-├── default.json   # conservative BC3 defaults — safe for all hardware
-└── quality.json   # BC7 for diffuse — better quality, slower on Linux CPU
-```
+Users drop alternative `profiles.json` files into `~/.config/atak/profiles.json` to
+switch configurations. Community members can contribute profiles for specific mod packs
+as PRs — low barrier to contribution, high value for the ecosystem.
 
-Users drop these into `~/.config/atak/profiles.json` to switch configurations.
-Community members can contribute profiles for specific mod packs as PRs —
-low barrier to contribution, high value for the ecosystem.
-
-`quality.json` differs from `default.json` in these profiles (BC7 instead of BC3):
-- Weapon Textures — players look at these up close constantly
-- Character / Hands — high detail, visible at close range
-- Diffuse / Color — general quality upgrade for named diffuse textures
-
-Recommended for: Windows users with discrete GPUs (BC7 is GPU-accelerated on Windows).
-Not recommended for: Linux users doing large compression jobs (BC7 is CPU-only on Linux).
-
-A future `lowvram.json` profile preset could set `maxTextureSize: 1024` on Sky,
-Terrain, and Detail profiles for users with 4GB VRAM cards who need maximum
-VRAM reduction beyond what BCn compression alone provides.
+Recommended for 4GB VRAM cards: set `"maxTextureSize": 1024` on Sky, Terrain, and
+Detail profiles. A `lowvram.json` preset in the repo would be a natural contribution.
 
 ---
 
@@ -1536,13 +1064,19 @@ No other external dependencies. Standard library only for everything else.
 go run ./main.go
 
 # Release — Linux x86-64, static
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build   -ldflags="-s -w -X main.version=v0.1.0"   -o atak-linux ./main.go
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+  -ldflags="-s -w -X main.version=v0.1.0" \
+  -o atak-linux ./main.go
 
 # Release — Windows x86-64
-CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build   -ldflags="-s -w -X main.version=v0.1.0"   -o atak-windows.exe ./main.go
+CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build \
+  -ldflags="-s -w -X main.version=v0.1.0" \
+  -o atak-windows.exe ./main.go
 
 # Release — macOS (universal embedded tools, Go binary is amd64)
-CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build   -ldflags="-s -w -X main.version=v0.1.0"   -o atak-macos ./main.go
+CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build \
+  -ldflags="-s -w -X main.version=v0.1.0" \
+  -o atak-macos ./main.go
 
 # goreleaser handles all targets in CI — version injected from git tag
 ```
@@ -1579,4 +1113,4 @@ These must be followed in every file or platform support silently breaks:
   no special handling needed, already correct via the stdlib.
 - **macOS process management:** Same as Linux — `syscall.SysProcAttr{Setpgid: true}`
   and `syscall.Kill(-pid, syscall.SIGKILL)` work on Darwin. `process_linux.go`
-  build tag should be changed to `//go:build linux || darwin`.
+  build tag should be `//go:build linux || darwin`.
