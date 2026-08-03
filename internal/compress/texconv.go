@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -37,20 +38,29 @@ func Run(ctx context.Context, texconvPath string, asset scan.Asset, format strin
 		return CompressionResult{Asset: asset, Success: false, Err: err}
 	}
 
-	// texconv -w/-h are exact, not maximums — small textures would be upscaled.
-	// Apply when either dimension exceeds the limit; -w alone preserves aspect ratio.
-	effectiveMaxSize := 0
-	if maxTextureSize > 0 && (asset.Width > maxTextureSize || asset.Height > maxTextureSize) {
-		effectiveMaxSize = maxTextureSize
+	// texconv -w/-h are exact, not maximums — compute both target dimensions explicitly
+	// to preserve aspect ratio. Scale by the larger dimension so neither axis exceeds
+	// maxTextureSize; guard asset.Width/Height > 0 to avoid division by zero on
+	// malformed headers (dimensions were 0 before the scan fix and fell through silently).
+	targetW, targetH := 0, 0
+	if maxTextureSize > 0 && asset.Width > 0 && asset.Height > 0 &&
+		(asset.Width > maxTextureSize || asset.Height > maxTextureSize) {
+		if asset.Width >= asset.Height {
+			targetW = maxTextureSize
+			targetH = int(math.Round(float64(asset.Height) * float64(maxTextureSize) / float64(asset.Width)))
+		} else {
+			targetH = maxTextureSize
+			targetW = int(math.Round(float64(asset.Width) * float64(maxTextureSize) / float64(asset.Height)))
+		}
 	}
 
 	actualFormat := format
-	success, stderr, runErr, after := runOnce(ctx, texconvPath, asset.Path, format, generateMips, effectiveMaxSize, outputDir)
+	success, stderr, runErr, after := runOnce(ctx, texconvPath, asset.Path, format, generateMips, targetW, targetH, outputDir)
 
 	// BC7 fallback — only if ctx is still live (not a cancellation failure).
 	if !success && format == "BC7_UNORM" && ctx.Err() == nil {
 		actualFormat = "BC3_UNORM"
-		success, stderr, runErr, after = runOnce(ctx, texconvPath, asset.Path, "BC3_UNORM", generateMips, effectiveMaxSize, outputDir)
+		success, stderr, runErr, after = runOnce(ctx, texconvPath, asset.Path, "BC3_UNORM", generateMips, targetW, targetH, outputDir)
 	}
 
 	if ctx.Err() != nil {
@@ -114,7 +124,7 @@ func ShouldGenerateMips(profileGenerateMips bool, sourceMipCount int, stripWhenD
 // texconvArgs builds the texconv command line. Kept separate from runOnce so the flags
 // can be asserted without executing texconv — generateMips was previously accepted by
 // Run and never reached this slice, which silently gave every profile a full mip chain.
-func texconvArgs(format string, generateMips bool, maxTextureSize int, outputDir, inputPath string) []string {
+func texconvArgs(format string, generateMips bool, targetW, targetH int, outputDir, inputPath string) []string {
 	// -m 0 builds the full chain down to 1x1; -m 1 emits the top level only. The caller
 	// resolves generateMips per file via ShouldGenerateMips, so a mipped source is never
 	// flattened and a mipless world texture still gets a chain forced by its profile.
@@ -131,15 +141,18 @@ func texconvArgs(format string, generateMips bool, maxTextureSize int, outputDir
 		"-nologo",      // suppress header
 		"-o", outputDir,
 	}
-	if maxTextureSize > 0 {
-		args = append(args, "-w", strconv.Itoa(maxTextureSize))
+	if targetW > 0 {
+		args = append(args, "-w", strconv.Itoa(targetW))
+	}
+	if targetH > 0 {
+		args = append(args, "-h", strconv.Itoa(targetH))
 	}
 	return append(args, "--", inputPath)
 }
 
 // runOnce executes a single texconv invocation and reports the outcome.
-func runOnce(ctx context.Context, texconvPath, inputPath, format string, generateMips bool, maxTextureSize int, outputDir string) (success bool, stderr string, err error, after int64) {
-	args := texconvArgs(format, generateMips, maxTextureSize, outputDir, inputPath)
+func runOnce(ctx context.Context, texconvPath, inputPath, format string, generateMips bool, targetW, targetH int, outputDir string) (success bool, stderr string, err error, after int64) {
+	args := texconvArgs(format, generateMips, targetW, targetH, outputDir, inputPath)
 
 	cmd := exec.Command(texconvPath, args...)
 	tools.SetProcAttr(cmd)

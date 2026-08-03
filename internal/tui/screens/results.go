@@ -212,10 +212,13 @@ func (m ResultsModel) buildJobs(scope int, selectedProfile, selectedMod string) 
 		for _, g := range filtered {
 			profileMips := mipsFor(g.ProfileName)
 			var paths, relPaths []string
+			var widths, heights []int
 			var genMips []bool
 			for _, a := range g.Assets {
 				paths = append(paths, a.Path)
 				relPaths = append(relPaths, a.VirtualRelPath)
+				widths = append(widths, a.Width)
+				heights = append(heights, a.Height)
 				// Resolve the mip chain per file: the profile forces mips for world
 				// textures, but otherwise the source's own mip count decides, so a mipped
 				// flare or reticle keeps its chain while flat UI art stays single-level —
@@ -229,6 +232,8 @@ func (m ResultsModel) buildJobs(scope int, selectedProfile, selectedMod string) 
 				MaxTextureSize: maxTextureSizeFor(g.ProfileName),
 				Paths:          paths,
 				RelPaths:       relPaths,
+				Widths:         widths,
+				Heights:        heights,
 				OutputDir:      "",
 			})
 		}

@@ -61,7 +61,7 @@ func TestTexconvArgsMips(t *testing.T) {
 		{false, "1"}, // top level only
 	}
 	for _, tt := range tests {
-		args := texconvArgs("BC3_UNORM", tt.generateMips, 0, "/out", "/in/x.dds")
+		args := texconvArgs("BC3_UNORM", tt.generateMips, 0, 0, "/out", "/in/x.dds")
 		got, ok := argValue(args, "-m")
 		if !ok {
 			t.Fatalf("generateMips=%v: no -m flag in %v", tt.generateMips, args)
@@ -72,15 +72,23 @@ func TestTexconvArgsMips(t *testing.T) {
 	}
 }
 
-// TestTexconvArgsMaxTextureSize checks that -w appears only when a limit is set, since
-// texconv treats -w as an exact width and would otherwise upscale small textures.
+// TestTexconvArgsMaxTextureSize checks that -w/-h appear only when explicit targets are
+// set. Both are passed together so texconv resizes to an exact pre-computed size that
+// preserves aspect ratio (Run computes targetW/targetH before calling here).
 func TestTexconvArgsMaxTextureSize(t *testing.T) {
-	if _, ok := argValue(texconvArgs("BC7_UNORM", true, 0, "/out", "/in/x.dds"), "-w"); ok {
-		t.Error("-w must be omitted when maxTextureSize is 0")
+	noResize := texconvArgs("BC7_UNORM", true, 0, 0, "/out", "/in/x.dds")
+	if _, ok := argValue(noResize, "-w"); ok {
+		t.Error("-w must be omitted when targetW is 0")
 	}
-	got, ok := argValue(texconvArgs("BC7_UNORM", true, 2048, "/out", "/in/x.dds"), "-w")
-	if !ok || got != "2048" {
-		t.Errorf("-w = %q (present=%v), want 2048", got, ok)
+	if _, ok := argValue(noResize, "-h"); ok {
+		t.Error("-h must be omitted when targetH is 0")
+	}
+	withResize := texconvArgs("BC7_UNORM", true, 1024, 512, "/out", "/in/x.dds")
+	if w, ok := argValue(withResize, "-w"); !ok || w != "1024" {
+		t.Errorf("-w = %q (present=%v), want 1024", w, ok)
+	}
+	if h, ok := argValue(withResize, "-h"); !ok || h != "512" {
+		t.Errorf("-h = %q (present=%v), want 512", h, ok)
 	}
 }
 
@@ -89,7 +97,7 @@ func TestTexconvArgsMaxTextureSize(t *testing.T) {
 // texconv would otherwise parse as a flag.
 func TestTexconvArgsInputIsTerminated(t *testing.T) {
 	const in = "/mods/-Kmack- Rifle Pack/gamedata/textures/wpn/ak74.dds"
-	args := texconvArgs("BC7_UNORM", true, 0, "/out", in)
+	args := texconvArgs("BC7_UNORM", true, 0, 0, "/out", in)
 	if len(args) < 2 || args[len(args)-2] != "--" || args[len(args)-1] != in {
 		t.Errorf("input path must be last and preceded by --, got %v", args[len(args)-3:])
 	}

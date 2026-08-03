@@ -177,8 +177,15 @@ func buildJobs(data CompressJobData) []compress.Job {
 			if i < len(g.GenerateMips) {
 				genMips = g.GenerateMips[i]
 			}
+			var w, h int
+			if i < len(g.Widths) {
+				w = g.Widths[i]
+			}
+			if i < len(g.Heights) {
+				h = g.Heights[i]
+			}
 			job := compress.Job{
-				Asset:          scan.Asset{Path: path},
+				Asset:          scan.Asset{Path: path, Width: w, Height: h},
 				Format:         g.Format,
 				GenerateMips:   genMips,
 				MaxTextureSize: g.MaxTextureSize,

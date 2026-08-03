@@ -1,5 +1,5 @@
 {
-    "_note": "Profile order matters — first match wins. Specific path patterns (ui/readables, flares) must precede general ones (ui/*, fx_*).",
+    "_note": "Profile order matters — first match wins. Specific path patterns (ui/readables, flares) must precede general ones (ui/*, fx_*). BC7_UNORM for weapons, characters, and diffuse. BC7 is CPU-intensive on Linux (no GPU acceleration); expect 3-5x slower compression than default. Will use GPU accceleration on Windows.",
     "minFileSizeBytes": 1024,
     "excludePatterns": [
         "fx_sun*",
@@ -83,7 +83,7 @@
         },
         {
             "name": "Diffuse / Color",
-            "format": "BC3_UNORM",
+            "format": "BC7_UNORM",
             "generateMips": true,
             "exclude": [
                 "*scope*diff*"
@@ -164,7 +164,7 @@
         },
         {
             "name": "Weapon Textures",
-            "format": "BC3_UNORM",
+            "format": "BC7_UNORM",
             "generateMips": true,
             "patterns": [
                 "*/textures/wpn/*",
@@ -173,7 +173,7 @@
         },
         {
             "name": "Character / Hands",
-            "format": "BC3_UNORM",
+            "format": "BC7_UNORM",
             "generateMips": true,
             "patterns": [
                 "*/textures/act/*",

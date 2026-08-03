@@ -66,6 +66,8 @@ type ConfiguredGroup struct {
 	MaxTextureSize int
 	Paths          []string
 	RelPaths       []string // parallel to Paths; non-empty element = VirtualRelPath for that asset
+	Widths         []int    // parallel to Paths; source texture width in pixels
+	Heights        []int    // parallel to Paths; source texture height in pixels
 	OutputDir      string   // empty means in-place (filepath.Dir of each asset)
 }
 
