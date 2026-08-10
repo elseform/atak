@@ -269,7 +269,20 @@ for S.T.A.L.K.E.R. Anomaly maintained by Grok. Join the community on
 - [Bubbles](https://github.com/charmbracelet/bubbles) — MIT — Charmbracelet
 - [Lip Gloss](https://github.com/charmbracelet/lipgloss) — MIT — Charmbracelet
 
-Full license text available in-app via the About screen.
+The optional compressonator-bc7e compression backend (Windows/Linux) additionally
+incorporates:
+
+- [AMD Compressonator](https://github.com/GPUOpen-Tools/compressonator) — MIT — © 2024 Advanced Micro Devices, Inc.; © 2004-2006 ATI Technologies Inc.
+- [nlohmann/json](https://github.com/nlohmann/json) — MIT — © 2013-2017 Niels Lohmann (linked into Compressonator)
+- [bc7e.ispc from richgel999/bc7enc_rdo](https://github.com/richgel999/bc7enc_rdo) — Apache License 2.0 — © 2018-2021 Binomial LLC (Richard Geldreich, Jr.)
+
+> This software incorporates bc7e.ispc from richgel999/bc7enc_rdo,
+> © Richard Geldreich / Binomial LLC, licensed under the Apache License,
+> Version 2.0.
+
+Full license text for every third-party component ships in
+`licenses/compressonator-bc7e/` and is also available in-app via the About
+screen.
 
 ---
 

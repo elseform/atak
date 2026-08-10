@@ -22,9 +22,13 @@ type Job struct {
 	RelPath      string // e.g. gamedata/textures/wpn/ak74.dds
 }
 
-// RunPool executes jobs concurrently using workerCount goroutines.
-// Results are sent to the returned channel, which is closed when all jobs complete.
-func RunPool(ctx context.Context, texconvPath string, jobs []Job, workerCount int) <-chan CompressionResult {
+// RunPool executes jobs concurrently using workerCount goroutines. Every job is
+// dispatched to primary; fallback (may be nil) covers the one case primary
+// can't handle — the compressonator maxTextureSize resize gap — and is picked
+// per-job by dispatch() rather than per-run so a mixed workload doesn't force
+// the whole run onto texconv. Results are sent to the returned channel, which
+// is closed when all jobs complete.
+func RunPool(ctx context.Context, primary, fallback Backend, jobs []Job, workerCount int) <-chan CompressionResult {
 	results := make(chan CompressionResult, len(jobs))
 	work := make(chan Job, len(jobs))
 
@@ -44,7 +48,7 @@ func RunPool(ctx context.Context, texconvPath string, jobs []Job, workerCount in
 					return
 				default:
 				}
-					if job.ModOutputDir != "" && job.RelPath != "" {
+				if job.ModOutputDir != "" && job.RelPath != "" {
 					outPath := filepath.Join(job.ModOutputDir, job.RelPath)
 					if _, err := os.Stat(outPath); err == nil {
 						// Already compressed on a previous run — skip incrementally.
@@ -57,7 +61,7 @@ func RunPool(ctx context.Context, texconvPath string, jobs []Job, workerCount in
 					}
 					job.OutputDir = filepath.Dir(outPath)
 				}
-				results <- Run(ctx, texconvPath, job.Asset, job.Format, job.GenerateMips, job.MaxTextureSize, job.OutputDir)
+				results <- dispatch(ctx, primary, fallback, job)
 			}
 		}()
 	}

@@ -80,5 +80,12 @@ type SummaryData struct {
 	TotalBefore   int64
 	TotalAfter    int64
 	Errors        []string
-	RetryPaths    []string
+	// FallbackCounts is reason (compress.Fallback* const) → count. Only nonzero
+	// keys are populated. Empty map = clean run, no fallbacks fired.
+	FallbackCounts map[string]int
+	// Fallbacks is one string per file that succeeded via a fallback, formatted
+	// for the drill-down list. Kept parallel-with-Errors so the summary screen
+	// can reuse the same cursor/window scroll semantics.
+	Fallbacks  []string
+	RetryPaths []string
 }

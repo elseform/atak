@@ -28,12 +28,26 @@ type profileFile struct {
 	Profiles         []Profile `json:"profiles"`
 }
 
+// Compression backend identifiers, used for Config.CompressionBackend and by the
+// compress package's backend registry. Kept as string constants (not iota) so the
+// value is stable across builds and legible in the on-disk config.json.
+const (
+	BackendTexconv          = "texconv"
+	BackendCompressonatorBc7e = "compressonator-bc7e"
+)
+
 // Config holds all user-persisted preferences.
 type Config struct {
 	ModsDir        string   `json:"modsDir"`
 	BackupDir      string   `json:"backupDir"`
 	WorkerCount    int      `json:"workerCount"`
 	BackupLevel    int      `json:"backupLevel,omitempty"`
+	// CompressionBackend selects which embedded compressor runs. Valid values:
+	// "texconv" (default, all platforms) and "compressonator-bc7e"
+	// (Linux/Windows only). On darwin the field is coerced back to "texconv"
+	// on load, so a config synced over from another OS can't select an
+	// unavailable backend.
+	CompressionBackend string `json:"compressionBackend,omitempty"`
 	// ScanExclusions are directory globs pruned during the scan. A plain name matches a
 	// directory (or mod) anywhere; a path pattern like */textures/ui/SquareDOV matches a
 	// nested directory, sharing the profiles.json pattern syntax. A matched directory and
@@ -88,7 +102,23 @@ func Load() (*Config, error) {
 	if cfg.ModOutputName == "" {
 		cfg.ModOutputName = "ATAK"
 	}
+	cfg.CompressionBackend = normalizeBackend(cfg.CompressionBackend)
 	return &cfg, nil
+}
+
+// normalizeBackend validates a persisted backend selection and coerces unknown
+// or platform-unavailable values back to the default. Called on every Load so
+// a config.json copied from another OS (e.g. Windows → macOS) never selects a
+// backend that isn't built for the current platform.
+func normalizeBackend(v string) string {
+	if runtime.GOOS == "darwin" {
+		return BackendTexconv
+	}
+	switch v {
+	case BackendTexconv, BackendCompressonatorBc7e:
+		return v
+	}
+	return BackendTexconv
 }
 
 // Save writes cfg to config.json in the user config dir.
@@ -151,13 +181,14 @@ func LoadProfiles() ([]Profile, []string, int, bool, error) {
 
 func defaultConfig() *Config {
 	return &Config{
-		ModsDir:        detectModsDir(),
-		WorkerCount:    1,
-		BackupLevel:    6,
-		ScanExclusions: []string{".*", "downloads", "Downloads", "G.A.M.M.A. UI"},
-		ModOutputMode:  true,
-		ModOutputName:  "ATAK",
-		ModlistPath:    "",
+		ModsDir:            detectModsDir(),
+		WorkerCount:        1,
+		BackupLevel:        6,
+		ScanExclusions:     []string{".*", "downloads", "Downloads", "G.A.M.M.A. UI"},
+		ModOutputMode:      true,
+		ModOutputName:      "ATAK",
+		ModlistPath:        "",
+		CompressionBackend: BackendTexconv,
 	}
 }
 

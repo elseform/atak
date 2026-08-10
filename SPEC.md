@@ -13,33 +13,53 @@ YouTube guide to install an Anomaly-based modpack and wants better performance w
 
 ## Embedded Binaries
 
-Both tools are embedded into the Go binary via `//go:embed` and build tags, so
-the correct platform binary is baked in at compile time. Extracted to a temp
-directory on startup, cleaned up on exit.
+Both compression backends (texconv, optional compressonator-bc7e) and 7-Zip are
+embedded into the Go binary via `//go:embed` and build tags, so the correct
+platform binary is baked in at compile time. Extracted to a temp directory on
+startup, cleaned up on exit.
 
 ```
-bin/
-├── texconv-linux       # community Linux port of Microsoft's texconv
-├── texconv-windows.exe # official Microsoft build
-├── texconv-macos       # matyalatte macOS universal binary (Intel + Apple Silicon)
-├── 7zz                 # 7-Zip standalone Linux binary
-├── 7zz.exe             # 7-Zip standalone Windows binary
-└── 7zz-macos           # 7-Zip standalone macOS universal binary (Intel + Apple Silicon)
+internal/tools/bin/
+├── texconv-linux                     # community Linux port of Microsoft's texconv
+├── texconv-windows.exe               # official Microsoft build
+├── texconv-macos                     # matyalatte macOS universal binary (Intel + Apple Silicon)
+├── compressonator-bc7e-linux         # AMD Compressonator fork with bc7e.ispc BC7 encoder (Linux)
+├── compressonator-bc7e-windows.exe   # same fork, Windows build
+├── 7zz                               # 7-Zip standalone Linux binary
+├── 7za.exe                           # 7-Zip standalone Windows binary
+└── 7zz-macos                         # 7-Zip standalone macOS universal binary (Intel + Apple Silicon)
 ```
+
+**macOS excludes compressonator-bc7e** — the upstream fork is Linux/Windows only
+(GPU codec paths removed, tested on GCC and MSVC; darwin is out of scope per the
+fork's own README §8). `embed_darwin.go` declares `compressonatorBin` as an
+empty byte slice and `compressonatorName` as `""`, and `Extract()` skips the
+write when the data is empty. Callers must check `EmbeddedTools.CompressonatorPath == ""`
+to know the backend is unavailable rather than special-casing `runtime.GOOS`.
 
 macOS universal binaries contain both x86-64 and ARM64 slices — one binary covers
 all Mac hardware. No need to split darwin/amd64 and darwin/arm64 build tags.
 
 Each platform has its own `embed_<platform>.go` with `//go:build` tag and
 `//go:embed` directives. All three use the same variable names (`texconvBin`,
-`sevenZipBin`) so the rest of the codebase is platform-agnostic. See
-`internal/tools/embed_linux.go` for the canonical pattern.
+`sevenZipBin`, `compressonatorBin`) so the rest of the codebase is
+platform-agnostic. See `internal/tools/embed_linux.go` for the canonical pattern.
+
+`EmbeddedTools` fields:
+- `TexconvPath` — always populated.
+- `SevenZipPath` — always populated.
+- `CompressonatorPath` — populated on Linux/Windows; empty string on darwin.
 
 On startup:
-1. Extract both binaries to `os.MkdirTemp`
-2. `chmod 0755` both (no-op on Windows, harmless)
+1. Extract every non-empty embedded binary to `os.MkdirTemp`
+2. `chmod 0755` (no-op on Windows, harmless)
 3. Store paths in an `EmbeddedTools` struct passed through the app
 4. `defer tools.Cleanup()` in main
+
+**Binary size:** adding compressonator-bc7e grows the Linux release binary the
+most (~9MB extra); Windows adds ~3.5MB. Current stripped (`-s -w`) sizes:
+Linux ~21MB, Windows ~12MB, macOS ~17MB — all still under the historical 25MB
+target. Watch this ceiling if further binaries land.
 
 No other runtime dependencies. The binary must run on any supported platform
 without the user installing anything.
@@ -699,7 +719,72 @@ assets are filtered to the chosen mod before passing to the worker pool.
 
 #### Compression Execution
 
-- Worker pool: `workerCount` concurrent texconv processes (default 1, configurable in Settings)
+- Worker pool: `workerCount` concurrent backend processes (default 1, configurable in Settings)
+
+- **Backend abstraction.** Two backends implement `compress.Backend`
+  (`Name() string`, `Compress(ctx, job) CompressionResult`):
+  - `TexconvBackend` — wraps the existing texconv path; behavior below is
+    unchanged from the pre-abstraction implementation.
+  - `CompressonatorBackend` — invokes the embedded compressonator-bc7e CLI
+    (`internal/compress/compressonator.go`). AMD Compressonator fork with the
+    CPU-side BC7 codec replaced by `bc7e.ispc` from richgel999/bc7enc_rdo;
+    GPU codec paths compiled out of the fork.
+
+  `worker.RunPool` selects the primary backend once per run from
+  `config.CompressionBackend` and passes it plus an optional fallback into each
+  worker goroutine. No per-file backend switching except the explicit
+  `maxTextureSize` fallback below.
+
+- **compressonator-bc7e is always CPU, on both platforms.** The fork ships with
+  its GPU codec paths compiled out — the GPU path isn't guaranteed to work and
+  is never attempted. `compressonatorArgs` **hardcodes `-EncodeWith CPU` on
+  every invocation** rather than relying on the binary's default, so a future
+  upstream change to the default can't quietly re-enable a broken GPU path.
+  This is not user-configurable. It also means Windows users choosing this
+  backend give up texconv's DirectX BC7 acceleration on purpose — the tradeoff
+  buys cross-platform bit-identical output and the fork's fixed BC7 p-bit
+  correctness. The active backend name and its CPU/GPU character are surfaced
+  in the compress `OperationScreen` title (e.g.
+  `Backend: compressonator-bc7e (CPU)` vs. `Backend: texconv (GPU for BC7)`)
+  so mid-run timing expectations are legible.
+
+- **maxTextureSize fallback (compressonator → texconv).** compressonator-bc7e's
+  CLI exposes mip controls but no exact-size resize flag (no `-w`/`-h`
+  equivalent). Rather than silently ignore `maxTextureSize`, `dispatch()` in
+  `internal/compress/backend.go` routes any file that needs resizing through a
+  texconv fallback backend for that file only. Mirrors the existing texconv
+  BC7 → BC3 fallback philosophy — automatic, transparent, recorded. The
+  backend that actually processed each file is captured in the new
+  `CompressionResult.Backend` field so the summary and error UI can attribute
+  mismatches correctly.
+
+- **DDS-reader gap fallback (compressonator → texconv, narrow match).**
+  compressonator-bc7e's DDS loader rejects some subvariants DirectXTex handles
+  — most commonly DX10-header DDS with an sRGB DXGI_FORMAT (e.g.
+  `DXGI_FORMAT_B8G8R8A8_UNORM_SRGB` = 91). When primary is compressonator and
+  its stderr contains the substring `Could not load source file`, `dispatch()`
+  retries the file through the texconv fallback. Match is deliberately narrow
+  — a blanket "any compressonator failure retries" would silently absorb
+  unrelated future failure classes (argv bugs, missing binary, permissions,
+  format mismatch) into a texconv retry that hides real bugs. On success the
+  fallback's `Backend` value (`"texconv"`) is preserved so mismatches surface
+  in the summary/error UI. Regression coverage:
+  `internal/compress/dispatch_srgb_test.go`.
+
+  On **double failure** (fallback also rejects the file, e.g. genuinely
+  corrupt DDS): the file is surfaced as a normal per-file failure — same
+  error list, same counting, same UI — with no special "fallback also failed"
+  state. `CompressionResult.Stderr` is the concatenation
+  `compressonator-bc7e:\n<primary stderr>\n---\ntexconv:\n<fallback stderr>`
+  so the failure record carries full debug context from both backends.
+  `CompressionResult.Backend` is blanked (`""`) in this case because neither
+  backend produced output — misattributing to either would be misleading.
+
+- **argv-dump-on-failure diagnostics.** When compressonator exits non-zero,
+  `Compress` prepends `argv: <bin> <args...>` to the diag string carried in
+  `CompressionResult.Stderr`. Keeps failure records self-contained — no need
+  to re-run under a debugger to see the child's command line.
+
 - Per-file texconv invocation:
   ```
   texconv -f <FORMAT> -m 0|1 -if CUBIC -gpu 0 -y -nologo [-w <W> -h <H>] -o <output_dir> -- <input_file>
@@ -729,7 +814,24 @@ assets are filtered to the chosen mod before passing to the worker pool.
 
 - **BC7 → BC3 automatic fallback:** If texconv exits non-zero with BC7_UNORM,
   automatically retry with BC3_UNORM. Matches proven bash script behavior.
-  `CompressionResult` records the actual format used after fallback.
+  `CompressionResult` records the actual format used after fallback. This
+  fallback is texconv-specific — compressonator-bc7e has no analogous BC7
+  fragility (bc7e.ispc is the whole point of the fork).
+
+- Per-file compressonator-bc7e invocation:
+  ```
+  compressonatorcli -fd <BC1|BC3|BC4|BC5|BC7> -EncodeWith CPU -Quality 1.0
+                    -noprogress (-mipsize 1 | -nomipmap)
+                    <input> <output.dds>
+  ```
+  Positional `output.dds` avoids texconv's extension-case rename dance
+  entirely. `-mipsize 1` produces a full mip chain to a 1-pixel minimum
+  (equivalent to texconv's `-m 0`); `-nomipmap` is the mipless branch. Mip
+  decision reuses `ShouldGenerateMips` — no per-backend re-implementation.
+  Unsupported format strings fail loudly (bug in upstream code, not a
+  silent default). Compressonator writes progress/diagnostics to stdout, not
+  stderr — the backend carries both into `CompressionResult.Stderr` so the
+  failure UI shows the actual error rather than empty.
 
 - **Extension case preservation:** texconv lowercases the output extension by
   default — `texture.DDS` becomes `texture.dds`. On Linux (case-sensitive
@@ -749,6 +851,30 @@ assets are filtered to the chosen mod before passing to the worker pool.
   estimated VRAM delta
 - Error list is navigable; failed files are shown with their stderr output
 - No retry with different settings — if a file failed, fix profiles.json and rescan
+
+- **Fallback surfacing on summary screen.** All three fallbacks (BC7→BC3,
+  compressonator→texconv resize, compressonator→texconv DDS reader gap) set
+  `CompressionResult.FallbackReason` to one of the `compress.Fallback*`
+  constants on success. The Compress→Summary bridge accumulates a
+  `FallbackCounts` map (reason → count) and a `Fallbacks` string slice
+  (per-file drill-down lines). The summary screen renders:
+    - **Per-reason counts** — one warning-colored line per reason with a
+      nonzero count (e.g. `↷  1 compressonator-bc7e → texconv (DDS reader
+      gap)`). Clean runs show no fallback lines — no "0 fallbacks" noise.
+    - **`Backend fallbacks` navigable section** — separate from Errors, using
+      the same j/k window-of-10 cursor mechanism. `tab` toggles cursor focus
+      between the two sections; a `▸` marker on the section header shows
+      which is focused. Fallbacks render in warning color (not danger) —
+      they succeeded, they just weren't handled by the primary backend.
+    - No live per-file backend indicator during the run — the CPU/GPU hint on
+      the run-header title covers the run-wide backend choice; per-file
+      fallbacks only surface post-run to avoid mid-run noise.
+
+  Rationale: `CompressionResult.Backend` and `FallbackReason` were set on
+  every path but not read anywhere in the UI before this — silent fallbacks
+  made the sRGB reader-gap failure look like a clean compressonator success
+  in a real 7GB run. The summary surface closes that gap without adding
+  mid-run noise.
 
 #### Cancellation
 
@@ -815,6 +941,14 @@ All platforms expose the same interface: `SetProcAttr(cmd)`, `KillProcess(cmd)`,
   chain to a single level regardless of source — smaller output at the cost of fidelity
   for flares/reticles. Never affects `generateMips:true`. Settings screen label:
   "Strip Mips When Disabled". Resolved in `compress.ShouldGenerateMips`.
+- **Compression backend** (`compressionBackend`) — string enum, valid values
+  `"texconv"` (default, all platforms) and `"compressonator-bc7e"` (Linux/Windows
+  only, CPU-only, deterministic across platforms). Unknown or empty values are
+  coerced to `"texconv"` on load. **On darwin, always coerced to `"texconv"` on
+  load** regardless of what's stored, so a config synced over from another OS
+  can't select a backend that isn't built for this platform. The Settings row
+  is hidden entirely on darwin rather than shown disabled. Toggle in Settings
+  with `space` / `←` / `→` — two-way selector, not free text.
 - Persist to `os.UserConfigDir()/atak/config.json`
 
 Full config.json schema (see `internal/config/config.go` for canonical struct):
@@ -828,7 +962,8 @@ Full config.json schema (see `internal/config/config.go` for canonical struct):
   "modOutputMode": false,
   "modOutputName": "ATAK",
   "modlistPath": "",
-  "stripMipsWhenDisabled": false
+  "stripMipsWhenDisabled": false,
+  "compressionBackend": "texconv"
 }
 ```
 
@@ -868,9 +1003,27 @@ project URL, and a scrollable section with all third-party licenses:
 1. texconv (Texconv-Custom-DLL) — MIT
 2. 7-Zip — LGPL v2.1
 3. Charmbracelet UI dependencies (bubbletea, bubbles, lipgloss) — MIT
+4. **compressonator-bc7e** (optional Windows/Linux backend) — **dual-licensed:
+   AMD Compressonator MIT + `bc7e.ispc` Apache License 2.0**. The Apache 2.0
+   grant requires the release to identify the incorporated Apache-2.0
+   component, and the About screen carries that attribution verbatim
+   alongside the license text:
+   > This software incorporates bc7e.ispc from richgel999/bc7enc_rdo,
+   > © Richard Geldreich / Binomial LLC, licensed under the Apache License,
+   > Version 2.0.
+
+   **Do not drop the Apache-2.0 side thinking the MIT entry covers the whole
+   backend** — they are two separate license grants on distinct code paths.
+   Full text for both licenses ships in `licenses/compressonator-bc7e/` and is
+   also inlined in `about.go`. `nlohmann/json` (MIT) is linked into
+   Compressonator and its notice ships alongside. ETCPack and its Ericsson
+   SLA are **not** part of this build's license surface (per the fork's own
+   README §3) and must not appear here even if a future contributor sees the
+   name in Compressonator sources.
 
 This satisfies matyalatte's redistribution requirement — license notice is
-present in the distributed binary's about screen.
+present in the distributed binary's about screen — and the Apache 2.0
+attribution requirement for bc7e.ispc.
 
 Version string injected at build time via `-ldflags "-X main.version=v0.1.0"`.
 In development builds without the flag, version displays as `dev`.
@@ -1095,7 +1248,10 @@ universal. The Go binary itself is architecture-specific but the embedded tools
 work on both Intel and Apple Silicon.
 
 The `-s -w` flags strip debug info. Final binaries should be under 25MB including
-all embedded tools (texconv + 7zz per platform).
+all embedded tools. As of the compressonator-bc7e addition, stripped release
+sizes are roughly Linux ~21MB, Windows ~12MB, macOS ~17MB — still comfortably
+under the ceiling, with Linux the tightest since it embeds compressonator-bc7e
+(~9MB) alongside texconv + 7zz. Track this if further binaries land.
 
 ## Cross-Platform Rules
 
@@ -1114,3 +1270,12 @@ These must be followed in every file or platform support silently breaks:
 - **macOS process management:** Same as Linux — `syscall.SysProcAttr{Setpgid: true}`
   and `syscall.Kill(-pid, syscall.SIGKILL)` work on Darwin. `process_linux.go`
   build tag should be `//go:build linux || darwin`.
+- **compressonator-bc7e is Windows/Linux only.** The upstream fork is not built
+  for darwin (§8 of the fork's README: "macOS: out of scope"). `embed_darwin.go`
+  declares `compressonatorBin` as an empty byte slice and `compressonatorName`
+  as `""`, `Extract()` skips writing it, and `config.normalizeBackend()` coerces
+  `compressionBackend` to `"texconv"` on load whenever `runtime.GOOS == "darwin"`.
+  The Settings row is hidden on darwin rather than shown disabled. Callers
+  must check `EmbeddedTools.CompressonatorPath == ""` for availability rather
+  than `runtime.GOOS` — mirrors how the lockfile / Job-Object process split is
+  keyed off feature availability rather than raw OS checks.

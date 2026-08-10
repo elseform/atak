@@ -19,10 +19,11 @@ const (
 	fieldBackupDir
 	fieldWorkers
 	fieldBackupLevel
-	fieldStripMips     // bool toggle — no text input
-	fieldModOutputMode // bool toggle — no text input
-	fieldModOutputName // text input, shown only when ModOutputMode is on
-	fieldModlistPath   // text input, shown only when ModOutputMode is on
+	fieldStripMips          // bool toggle — no text input
+	fieldCompressionBackend // two-way selector, hidden on darwin (no compressonator build)
+	fieldModOutputMode      // bool toggle — no text input
+	fieldModOutputName      // text input, shown only when ModOutputMode is on
+	fieldModlistPath        // text input, shown only when ModOutputMode is on
 	fieldCount
 )
 
@@ -57,6 +58,10 @@ type SettingsModel struct {
 	height        int
 	// stripMips mirrors cfg.StripMipsWhenDisabled while the toggle is being edited.
 	stripMips bool
+	// compressionBackend mirrors cfg.CompressionBackend while the selector is
+	// being edited. On darwin this stays "texconv" — the row is hidden and
+	// there's no way to change it.
+	compressionBackend string
 }
 
 func NewSettings(cfg *config.Config) SettingsModel {
@@ -85,12 +90,18 @@ func NewSettings(cfg *config.Config) SettingsModel {
 	modlistPath.SetValue(cfg.ModlistPath)
 	modlistPath.Width = 60
 
+	backend := cfg.CompressionBackend
+	if backend == "" {
+		backend = config.BackendTexconv
+	}
+
 	return SettingsModel{
-		cfg:           cfg,
-		inputs:        [6]textinput.Model{mods, backup, workers, backupLvl, modOutputName, modlistPath},
-		modOutputMode: cfg.ModOutputMode,
-		stripMips:     cfg.StripMipsWhenDisabled,
-		focused:       fieldModsDir,
+		cfg:                cfg,
+		inputs:             [6]textinput.Model{mods, backup, workers, backupLvl, modOutputName, modlistPath},
+		modOutputMode:      cfg.ModOutputMode,
+		stripMips:          cfg.StripMipsWhenDisabled,
+		compressionBackend: backend,
+		focused:            fieldModsDir,
 	}
 }
 
@@ -110,13 +121,21 @@ func (m SettingsModel) Update(msg tea.Msg) (SettingsModel, tea.Cmd) {
 			return m, nil
 		case "enter":
 			return m.save()
-		case " ":
+		case " ", "left", "right":
 			if m.focused == fieldModOutputMode {
 				m.modOutputMode = !m.modOutputMode
 				return m, nil
 			}
 			if m.focused == fieldStripMips {
 				m.stripMips = !m.stripMips
+				return m, nil
+			}
+			if m.focused == fieldCompressionBackend {
+				if m.compressionBackend == config.BackendTexconv {
+					m.compressionBackend = config.BackendCompressonatorBc7e
+				} else {
+					m.compressionBackend = config.BackendTexconv
+				}
 				return m, nil
 			}
 		case "esc", "q":
@@ -169,6 +188,9 @@ func (m SettingsModel) isVisible(f settingsField) bool {
 	if f == fieldModOutputName || f == fieldModlistPath {
 		return m.modOutputMode
 	}
+	if f == fieldCompressionBackend {
+		return runtime.GOOS != "darwin"
+	}
 	return true
 }
 
@@ -194,6 +216,11 @@ func (m SettingsModel) save() (SettingsModel, tea.Cmd) {
 	updated.ModOutputName = modOutputName
 	updated.ModlistPath = strings.TrimSpace(m.inputs[5].Value())
 	updated.StripMipsWhenDisabled = m.stripMips
+	if runtime.GOOS == "darwin" {
+		updated.CompressionBackend = config.BackendTexconv
+	} else {
+		updated.CompressionBackend = m.compressionBackend
+	}
 	return m, func() tea.Msg {
 		return NavigateMsg{To: NavSaveConfig, Data: &updated}
 	}
@@ -244,6 +271,25 @@ func (m SettingsModel) View() string {
 		}
 		b.WriteString(toggleValue + "\n")
 		b.WriteString(style.StyleMuted.Render("When on, profiles with generateMips=false skip mips entirely, dropping any chain the\n  source shipped. When off (default), a mipped source keeps its chain (flares, reticles).") + "\n\n")
+	}
+
+	// Compression backend selector — hidden on macOS since compressonator-bc7e
+	// isn't built for darwin.
+	if runtime.GOOS != "darwin" {
+		label := "Compression Backend"
+		var value string
+		if m.compressionBackend == config.BackendCompressonatorBc7e {
+			value = style.StyleSuccess.Render("[ compressonator-bc7e ]") + "   texconv"
+		} else {
+			value = "compressonator-bc7e   " + style.StyleSuccess.Render("[ texconv ]")
+		}
+		if m.focused == fieldCompressionBackend {
+			b.WriteString(style.StyleSelected.Render(label) + "\n")
+		} else {
+			b.WriteString(style.StyleBody.Render(label) + "\n")
+		}
+		b.WriteString(value + "\n")
+		b.WriteString(style.StyleMuted.Render("compressonator-bc7e: CPU only, all 5 BC formats, deterministic across platforms.\n  texconv: GPU-accelerated on Windows for BC7 (much faster there); CPU on Linux.\n  space/←/→ to switch.") + "\n\n")
 	}
 
 	// Mod Output Mode toggle.

@@ -15,17 +15,60 @@ import (
 	"github.com/noisethanks/atak/internal/tools"
 )
 
-// CompressionResult holds the outcome of a single texconv invocation.
+// FallbackReason identifies which fallback path produced a successful result.
+// Empty string means no fallback fired (primary handled the file directly).
+// Used by summary/error UI to surface silent-fallback attribution — a success
+// via fallback is still a success, but the user should be able to see it.
+const (
+	FallbackBC7ToBC3      = "bc7-to-bc3"                  // texconv exit≠0 on BC7 → retried BC3
+	FallbackResize        = "compressonator-resize"       // compressonator can't -w/-h → routed to texconv
+	FallbackReaderGap     = "compressonator-reader-gap"   // compressonator DDS reader rejected → retried texconv
+)
+
+// FallbackLabel returns a human-readable label for a fallback reason.
+func FallbackLabel(reason string) string {
+	switch reason {
+	case FallbackBC7ToBC3:
+		return "BC7 → BC3 (texconv encoder rejected BC7)"
+	case FallbackResize:
+		return "compressonator-bc7e → texconv (maxTextureSize resize)"
+	case FallbackReaderGap:
+		return "compressonator-bc7e → texconv (DDS reader gap)"
+	}
+	return reason
+}
+
+// CompressionResult holds the outcome of a single backend invocation.
 type CompressionResult struct {
-	Asset         scan.Asset
-	ActualFormat  string // format actually used; may differ from requested if BC3_UNORM fallback was triggered
-	Success       bool
-	Skipped       bool // true when source file is already compressed (pre-job filter)
-	OutputSkipped bool // true when output file already exists in mod output dir (incremental skip)
-	Err           error
-	Stderr        string
-	Before        int64
-	After         int64
+	Asset          scan.Asset
+	Backend        string // backend that actually processed the file — "texconv" | "compressonator-bc7e" | "" on double-failure (neither produced output)
+	FallbackReason string // one of Fallback* consts; empty when primary handled the file with no fallback
+	ActualFormat   string // format actually used; may differ from requested if BC3_UNORM fallback was triggered
+	Success        bool
+	Skipped        bool // true when source file is already compressed (pre-job filter)
+	OutputSkipped  bool // true when output file already exists in mod output dir (incremental skip)
+	Err            error
+	Stderr         string
+	Before         int64
+	After          int64
+}
+
+// TexconvBackend implements Backend by shelling out to the embedded texconv
+// binary. Its arg builder, BC7→BC3 fallback, and post-run extension-case fix
+// stay identical to the pre-backend-abstraction behavior — the abstraction
+// only shifts where the entry point lives.
+type TexconvBackend struct {
+	Path string
+}
+
+func NewTexconvBackend(path string) *TexconvBackend { return &TexconvBackend{Path: path} }
+
+func (b *TexconvBackend) Name() string { return "texconv" }
+
+func (b *TexconvBackend) Compress(ctx context.Context, job Job) CompressionResult {
+	r := Run(ctx, b.Path, job.Asset, job.Format, job.GenerateMips, job.MaxTextureSize, job.OutputDir)
+	r.Backend = b.Name()
+	return r
 }
 
 // Run invokes texconv on a single asset and returns the result.
@@ -89,13 +132,18 @@ func Run(ctx context.Context, texconvPath string, asset scan.Asset, format strin
 			os.Rename(texconvOut, asset.Path)
 		}
 	}
+	var fallback string
+	if actualFormat != format {
+		fallback = FallbackBC7ToBC3
+	}
 	return CompressionResult{
-		Asset:        asset,
-		ActualFormat: actualFormat,
-		Success:      true,
-		Stderr:       stderr,
-		Before:       before,
-		After:        after,
+		Asset:          asset,
+		ActualFormat:   actualFormat,
+		FallbackReason: fallback,
+		Success:        true,
+		Stderr:         stderr,
+		Before:         before,
+		After:          after,
 	}
 }
 

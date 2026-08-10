@@ -366,7 +366,86 @@ FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.`
+SOFTWARE.
+
+
+compressonator-bc7e (optional compression backend, Windows/Linux only)
+------------------------------------------------------------------------
+This backend is a fork of AMD Compressonator with the CPU-side BC7 codec
+replaced by bc7e.ispc from richgel999/bc7enc_rdo. Two licenses apply.
+
+--- AMD Compressonator (MIT) ---
+Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2004-2006 ATI Technologies Inc.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+--- nlohmann/json (MIT, linked into Compressonator) ---
+Copyright (c) 2013-2017 Niels Lohmann
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+--- bc7e.ispc (Apache License 2.0) ---
+This software incorporates bc7e.ispc from richgel999/bc7enc_rdo,
+Copyright (C) 2018-2021 Binomial LLC, licensed under the Apache License,
+Version 2.0. The bc7enc_rdo project is © Richard Geldreich, Jr.
+
+Attribution notice (required by Apache License 2.0, §4d):
+
+  This software incorporates bc7e.ispc from richgel999/bc7enc_rdo,
+  © Richard Geldreich / Binomial LLC, licensed under the Apache License,
+  Version 2.0.
+
+The bc7enc_rdo repository LICENSE file (included verbatim below) identifies
+bc7e.ispc as Apache 2.0 and provides the copyright. The full Apache 2.0
+license text follows.
+
+--- bc7enc_rdo LICENSE (as shipped by the upstream repo) ---
+If you use this software in a product, attribution / credits is requested
+but not required.
+
+bc7e.ispc uses the Apache 2.0 license and is Copyright (C) 2018-2021
+Binomial LLC.
+
+All other source code files in that repo are available under either the MIT
+License (Copyright (c) 2020-2021 Richard Geldreich, Jr.) or the Unlicense
+public-domain dedication — atak links only bc7e.ispc, so the Apache 2.0
+grant is the operative one for this distribution.
+
+--- Apache License, Version 2.0 (full text) ---
+` + apacheLicense2_0
 
 // AboutModel displays version info and scrollable third-party license text.
 type AboutModel struct {
