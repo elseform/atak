@@ -1321,14 +1321,20 @@ builds without the flag, version displays as `dev`.
 
 - `linux/amd64` — primary, tested by maintainer
 - `windows/amd64` — supported, community-tested
-- `darwin/amd64` — macOS, community-tested. Runs under Rosetta 2 on Apple Silicon; the embedded tools are universal, so they cover both architectures either way.
+- `darwin/amd64` — macOS on Intel, community-tested
+- `darwin/arm64` — macOS on Apple Silicon, native
 
-Note: the embedded macOS tools are all universal binaries, so one darwin target
-still builds. The Go binary itself is architecture-specific, and the release
-currently builds `darwin/amd64` only — on Apple Silicon that runs under Rosetta
-2 and its child processes take the x86-64 slice of each embedded tool. Adding a
-`darwin/arm64` target is what makes the native slices reachable for release
-users; local `go build` on an Apple Silicon Mac already gets them.
+Note: macOS ships two archives, not one universal binary. The Go binary is
+architecture-specific while the embedded tools are universal, so a universal
+atak would carry two full copies of the tools — about 45MB against a 25MB
+target. Two 22MB archives stay under it.
+
+The architecture of the atak process decides the architecture of every tool it
+spawns: a universal child inherits the parent's slice, so an `atak-macos` built
+for arm64 runs texconv, 7zz and compressonator-bc7e natively, and an x86-64
+build runs all three under Rosetta 2. That is why `darwin/arm64` is a release
+target rather than an optional extra — before it existed, every release user on
+Apple Silicon was translated end to end.
 
 The `-s -w` flags strip debug info. Final binaries should be under 25MB including
 all embedded tools. With compressonator-bc7e on all three platforms, stripped
