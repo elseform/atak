@@ -1,13 +1,32 @@
 package screens
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 
-	"github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/noisethanks/atak/internal/config"
 	"github.com/noisethanks/atak/internal/tui/style"
 )
+
+func detectModsDir(home string) string {
+	if home == "" {
+		return ""
+	}
+	candidates := []string{
+		filepath.Join(home, "gamma/mo2/mods"),
+		filepath.Join(home, "Games/gamma/mo2/mods"),
+		filepath.Join(home, "Games/Anomaly/mods"),
+	}
+	for _, c := range candidates {
+		if stat, err := os.Stat(c); err == nil && stat.IsDir() {
+			return c
+		}
+	}
+	return ""
+}
 
 // WelcomeModel handles first-run path configuration.
 type WelcomeModel struct {
@@ -21,15 +40,28 @@ type WelcomeModel struct {
 }
 
 func NewWelcome(cfg *config.Config) WelcomeModel {
+	home, _ := os.UserHomeDir()
+	if home == "" {
+		home = "/home/user"
+	}
+
 	mods := textinput.New()
-	mods.Placeholder = "/home/user/Games/Anomaly/mods"
-	mods.SetValue(cfg.ModsDir)
+	mods.Placeholder = filepath.Join(home, "Games/Anomaly/mods")
+	val := cfg.ModsDir
+	if val == "" {
+		val = detectModsDir(home)
+	}
+	mods.SetValue(val)
 	mods.Focus()
 	mods.Width = 60
 
 	bkup := textinput.New()
-	bkup.Placeholder = "/home/user/backups"
-	bkup.SetValue(cfg.BackupDir)
+	bkup.Placeholder = filepath.Join(home, "backups")
+	bkupVal := cfg.BackupDir
+	if bkupVal == "" {
+		bkupVal = filepath.Join(home, "gamma/backups")
+	}
+	bkup.SetValue(bkupVal)
 	bkup.Width = 60
 
 	return WelcomeModel{
