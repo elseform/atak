@@ -122,8 +122,8 @@
             ]
         },
         {
-            "name": "Normal Maps",
-            "format": "BC5_UNORM",
+            "name": "Bump Maps",
+            "format": "BC7_UNORM",
             "generateMips": true,
             "exclude": [
                 "*scope*bump*",
@@ -132,14 +132,21 @@
             "patterns": [
                 "*_bump.*",
                 "*_bump#.*",
+                "*nbump*",
+                "*_normalbump.*"
+            ]
+        },
+        {
+            "name": "Normal Maps",
+            "format": "BC5_UNORM",
+            "generateMips": true,
+            "patterns": [
                 "*_normal.*",
                 "*_nm.*",
                 "*_nmap.*",
                 "*_nrm.*",
                 "*_norm.*",
                 "*_norm_*",
-                "*nbump*",
-                "*_normalbump.*",
                 "*_nm_*"
             ]
         },
