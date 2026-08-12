@@ -15,7 +15,17 @@
         "*_cube#*",
         "*/textures/ui/SquareDOV/*",
         "ui_font_*",
-        "cursor_*"
+        "cursor_*",
+        "*/textures/ui/alticons/*",
+        "*/textures/ui/absui_arrows.*",
+        "*/textures/ui/arm_radial_menu.*",
+        "*/textures/ui/enhancedGUI/*",
+        "*/textures/ui/nerfs/*",
+        "*/textures/ui/paw/*",
+        "*/textures/ui/qaw_*",
+        "*/textures/ui/sidhud/*",
+        "*/textures/ui/ui_haruka_*",
+        "*/textures/ui/ui_magnifier2.*"
     ],
     "profiles": [
         {
