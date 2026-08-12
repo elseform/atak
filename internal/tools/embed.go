@@ -12,9 +12,9 @@ import (
 var LicenseText []byte
 
 // EmbeddedTools holds paths to extracted binaries for the current session.
-// CompressonatorPath is empty on platforms where the compressonator-bc7e backend
-// is unavailable (currently macOS) — callers must treat "" as "unavailable"
-// rather than special-casing runtime.GOOS.
+// CompressonatorPath is empty if the embedded binary is missing for the
+// current platform — callers must treat "" as "unavailable" rather than
+// special-casing runtime.GOOS.
 type EmbeddedTools struct {
 	TexconvPath        string
 	SevenZipPath       string
@@ -43,8 +43,7 @@ func writeBin(dir, name string, data []byte) (string, error) {
 }
 
 // Extract writes embedded binaries to a temp dir and returns the tool paths.
-// The compressonator binary is only written when the embedded data is non-empty
-// (i.e. skipped on darwin where the fork isn't built).
+// The compressonator binary is only written when the embedded data is non-empty.
 func Extract() (*EmbeddedTools, error) {
 	dir, err := os.MkdirTemp("", "atak-*")
 	if err != nil {

@@ -213,11 +213,7 @@ func (m SettingsModel) save() (SettingsModel, tea.Cmd) {
 	updated.ModOutputName = modOutputName
 	updated.ModlistPath = strings.TrimSpace(m.inputs[5].Value())
 	updated.StripMipsWhenDisabled = m.stripMips
-	if runtime.GOOS == "darwin" {
-		updated.CompressionBackend = config.BackendTexconv
-	} else {
-		updated.CompressionBackend = m.compressionBackend
-	}
+	updated.CompressionBackend = m.compressionBackend
 	return m, func() tea.Msg {
 		return NavigateMsg{To: NavSaveConfig, Data: &updated}
 	}

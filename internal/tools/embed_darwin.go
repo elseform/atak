@@ -12,7 +12,6 @@ var sevenZipBin []byte
 
 //go:embed bin/compressonator-bc7e-macos
 var compressonatorBin []byte
-var _ = compressonatorBin
 
 const texconvName = "texconv"
 const sevenZipName = "7zz"

@@ -111,12 +111,12 @@ func Load() (*Config, error) {
 // a config.json copied from another OS (e.g. Windows → macOS) never selects a
 // backend that isn't built for the current platform.
 func normalizeBackend(v string) string {
-	if runtime.GOOS == "darwin" {
-		return BackendCompressonatorBc7e
-	}
 	switch v {
 	case BackendTexconv, BackendCompressonatorBc7e:
 		return v
+	}
+	if runtime.GOOS == "darwin" {
+		return BackendCompressonatorBc7e
 	}
 	return BackendTexconv
 }
