@@ -1,5 +1,5 @@
 {
-    "_note": "Profile order matters — first match wins. Specific path patterns (ui/readables, flares) must precede general ones (ui/*, fx_*). BC7_UNORM for weapons, characters, and diffuse. BC7 is CPU-intensive on Linux (no GPU acceleration); expect 3-5x slower compression than default. Will use GPU accceleration on Windows.",
+    "_note": "Profile order matters \u2014 first match wins. Specific path patterns (ui/readables, flares) must precede general ones (ui/*, fx_*). BC7_UNORM for everything except Normal Maps (BC5_UNORM \u2014 required for correct engine lighting, do not change). BC7 is CPU-intensive on Linux/macOS (no GPU acceleration); expect much slower compression than BC3. Will use GPU acceleration on Windows.",
     "minFileSizeBytes": 1024,
     "excludePatterns": [
         "fx_sun*",
@@ -13,12 +13,14 @@
         "*#small*",
         "*cube#*",
         "*_cube#*",
-        "*/textures/ui/SquareDOV/*"
+        "*/textures/ui/SquareDOV/*",
+        "ui_font_*",
+        "cursor_*"
     ],
     "profiles": [
         {
             "name": "UI Readables",
-            "format": "BC3_UNORM",
+            "format": "BC7_UNORM",
             "generateMips": false,
             "patterns": [
                 "*/textures/ui/readables/*",
@@ -27,7 +29,7 @@
         },
         {
             "name": "Flares / FX",
-            "format": "BC3_UNORM",
+            "format": "BC7_UNORM",
             "generateMips": false,
             "patterns": [
                 "*/textures/anamflares/*",
@@ -36,7 +38,7 @@
         },
         {
             "name": "Particle / FX",
-            "format": "BC3_UNORM",
+            "format": "BC7_UNORM",
             "generateMips": false,
             "patterns": [
                 "*/textures/semitone/*"
@@ -66,7 +68,7 @@
         },
         {
             "name": "Custom UI",
-            "format": "BC3_UNORM",
+            "format": "BC7_UNORM",
             "generateMips": false,
             "patterns": [
                 "*/textures/catsy/*"
@@ -74,7 +76,7 @@
         },
         {
             "name": "UI / Icons",
-            "format": "BC3_UNORM",
+            "format": "BC7_UNORM",
             "generateMips": false,
             "patterns": [
                 "*/textures/ui/*",
@@ -105,7 +107,7 @@
         },
         {
             "name": "Specular / Gloss",
-            "format": "BC3_UNORM",
+            "format": "BC7_UNORM",
             "generateMips": true,
             "patterns": [
                 "*_spec.*",
@@ -114,7 +116,7 @@
         },
         {
             "name": "Masks / Alpha",
-            "format": "BC3_UNORM",
+            "format": "BC7_UNORM",
             "generateMips": true,
             "patterns": [
                 "*_mask.*",
@@ -123,7 +125,7 @@
         },
         {
             "name": "Sky Textures",
-            "format": "BC3_UNORM",
+            "format": "BC7_UNORM",
             "generateMips": true,
             "patterns": [
                 "*/textures/sky/*"
@@ -131,7 +133,7 @@
         },
         {
             "name": "Detail / Terrain",
-            "format": "BC3_UNORM",
+            "format": "BC7_UNORM",
             "generateMips": true,
             "patterns": [
                 "*/textures/detail/*",
@@ -140,7 +142,7 @@
         },
         {
             "name": "Sights / Reticles",
-            "format": "BC3_UNORM",
+            "format": "BC7_UNORM",
             "generateMips": false,
             "patterns": [
                 "*/textures/wpn/scope_reticles/*",
@@ -182,7 +184,7 @@
         },
         {
             "name": "Items",
-            "format": "BC3_UNORM",
+            "format": "BC7_UNORM",
             "generateMips": true,
             "patterns": [
                 "*/textures/items/*",
