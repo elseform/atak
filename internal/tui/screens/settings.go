@@ -285,7 +285,7 @@ func (m SettingsModel) View() string {
 			b.WriteString(style.StyleBody.Render(label) + "\n")
 		}
 		b.WriteString(value + "\n")
-		b.WriteString(style.StyleMuted.Render("compressonator-bc7e: CPU only, all 5 BC formats, deterministic across platforms.\n  texconv: GPU-accelerated on Windows for BC7 (much faster there); CPU on Linux.\n  space/←/→ to switch.") + "\n\n")
+		b.WriteString(style.StyleMuted.Render("compressonator-bc7e: CPU only, all 5 BC formats, deterministic across platforms.\n  texconv: GPU-accelerated on Windows for BC7; CPU on Linux/macOS.\n  space/←/→ to switch.") + "\n\n")
 	}
 
 	// Mod Output Mode toggle.
