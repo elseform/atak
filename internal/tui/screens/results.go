@@ -214,6 +214,8 @@ func (m ResultsModel) buildJobs(scope int, selectedProfile, selectedMod string) 
 			var paths, relPaths []string
 			var widths, heights []int
 			var genMips []bool
+			var modOutputDirs []string
+			anyModOutputDir := false
 			for _, a := range g.Assets {
 				paths = append(paths, a.Path)
 				relPaths = append(relPaths, a.VirtualRelPath)
@@ -224,8 +226,19 @@ func (m ResultsModel) buildJobs(scope int, selectedProfile, selectedMod string) 
 				// flare or reticle keeps its chain while flat UI art stays single-level —
 				// unless StripMipsWhenDisabled makes generateMips:false authoritative.
 				genMips = append(genMips, compress.ShouldGenerateMips(profileMips, a.SourceMipCount, cfg.StripMipsWhenDisabled))
+				if cfg.ModOutputMode && cfg.ModOutputName != "" && cfg.PerModModOutput {
+					name := cfg.ModOutputName + " - " + a.ModName
+					if cfg.PerCategoryModOutput {
+						name += " - " + g.ProfileName
+					}
+					dir := filepath.Join(cfg.ModsDir, name)
+					modOutputDirs = append(modOutputDirs, dir)
+					anyModOutputDir = true
+				} else {
+					modOutputDirs = append(modOutputDirs, "")
+				}
 			}
-			configured = append(configured, ConfiguredGroup{
+			cg := ConfiguredGroup{
 				ProfileName:    g.ProfileName,
 				Format:         g.SuggestedFmt,
 				GenerateMips:   genMips,
@@ -235,7 +248,17 @@ func (m ResultsModel) buildJobs(scope int, selectedProfile, selectedMod string) 
 				Widths:         widths,
 				Heights:        heights,
 				OutputDir:      "",
-			})
+			}
+			if anyModOutputDir {
+				cg.ModOutputDirs = modOutputDirs
+			} else if cfg.ModOutputMode && cfg.ModOutputName != "" {
+				if cfg.PerCategoryModOutput {
+					cg.ModOutputDir = filepath.Join(cfg.ModsDir, cfg.ModOutputName+" - "+g.ProfileName)
+				} else {
+					cg.ModOutputDir = filepath.Join(cfg.ModsDir, cfg.ModOutputName)
+				}
+			}
+			configured = append(configured, cg)
 		}
 		jobData := CompressJobData{
 			Groups:      configured,
@@ -243,7 +266,12 @@ func (m ResultsModel) buildJobs(scope int, selectedProfile, selectedMod string) 
 			ModsDir:     cfg.ModsDir,
 		}
 		if cfg.ModOutputMode && cfg.ModOutputName != "" {
-			jobData.ModOutputDir = filepath.Join(cfg.ModsDir, cfg.ModOutputName)
+			if cfg.PerCategoryModOutput || cfg.PerModModOutput {
+				jobData.ModOutputDir = filepath.Join(cfg.ModsDir, cfg.ModOutputName+" - *")
+				jobData.ModOutputIsPattern = true
+			} else {
+				jobData.ModOutputDir = filepath.Join(cfg.ModsDir, cfg.ModOutputName)
+			}
 		}
 		return NavigateMsg{To: NavCompress, Data: jobData}
 	}
