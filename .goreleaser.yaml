@@ -25,9 +25,18 @@ builds:
       - -s -w -X main.version={{.Version}}
     binary: atak-windows
 
-  - id: macos
+  - id: macos-amd64
     goos: [darwin]
     goarch: [amd64]
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+    binary: atak-macos
+
+  - id: macos-arm64
+    goos: [darwin]
+    goarch: [arm64]
     env:
       - CGO_ENABLED=0
     ldflags:
@@ -53,10 +62,19 @@ archives:
       - SPEC.md
       - THIRD_PARTY_LICENSES.txt
 
-  - id: macos
-    builds: [macos]
+  - id: macos-amd64
+    builds: [macos-amd64]
     format: tar.gz
     name_template: "atak-{{.Version}}-macos-x64"
+    files:
+      - README.md
+      - SPEC.md
+      - THIRD_PARTY_LICENSES.txt
+
+  - id: macos-arm64
+    builds: [macos-arm64]
+    format: tar.gz
+    name_template: "atak-{{.Version}}-macos-arm64"
     files:
       - README.md
       - SPEC.md
@@ -80,12 +98,13 @@ release:
     ### Download
     - **Linux:** `atak-{{.Version}}-linux-x64.tar.gz`
     - **Windows:** `atak-{{.Version}}-windows-x64.zip`
-    - **macOS (Intel):** `atak-{{.Version}}-macos-x64.tar.gz`
+    - **macOS (Apple Silicon):** `atak-{{.Version}}-macos-arm64.tar.gz` — native, uses the CPU-accelerated compressonator-bc7e backend by default
+    - **macOS (Intel):** `atak-{{.Version}}-macos-x64.tar.gz` — uses texconv by default (compressonator-bc7e-macos is Apple Silicon only)
 
     ### Installation
     **Linux / macOS:**
     ```bash
-    tar -xzf atak-{{.Version}}-linux-x64.tar.gz  # or macos-x64
+    tar -xzf atak-{{.Version}}-linux-x64.tar.gz  # or macos-x64 / macos-arm64
     chmod +x atak-linux  # or atak-macos
     ./atak-linux         # or ./atak-macos
     ```

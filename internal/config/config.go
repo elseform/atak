@@ -115,7 +115,7 @@ func normalizeBackend(v string) string {
 	case BackendTexconv, BackendCompressonatorBc7e:
 		return v
 	}
-	if runtime.GOOS == "darwin" {
+	if runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" {
 		return BackendCompressonatorBc7e
 	}
 	return BackendTexconv
@@ -191,7 +191,7 @@ func defaultConfig() *Config {
 		CompressionBackend: BackendTexconv,
 	}
 
-	if runtime.GOOS == "darwin" {
+	if runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" {
 		cfg.CompressionBackend = BackendCompressonatorBc7e
 	}
 	return cfg
