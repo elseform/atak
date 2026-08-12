@@ -112,7 +112,7 @@ func Load() (*Config, error) {
 // backend that isn't built for the current platform.
 func normalizeBackend(v string) string {
 	if runtime.GOOS == "darwin" {
-		return BackendTexconv
+		return BackendCompressonatorBc7e
 	}
 	switch v {
 	case BackendTexconv, BackendCompressonatorBc7e:
@@ -180,7 +180,7 @@ func LoadProfiles() ([]Profile, []string, int, bool, error) {
 }
 
 func defaultConfig() *Config {
-	return &Config{
+	cfg := &Config{
 		ModsDir:            detectModsDir(),
 		WorkerCount:        1,
 		BackupLevel:        6,
@@ -190,6 +190,11 @@ func defaultConfig() *Config {
 		ModlistPath:        "",
 		CompressionBackend: BackendTexconv,
 	}
+
+	if runtime.GOOS == "darwin" {
+		cfg.CompressionBackend = BackendCompressonatorBc7e
+	}
+	return cfg
 }
 
 func detectModsDir() string {

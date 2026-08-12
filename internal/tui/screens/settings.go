@@ -188,9 +188,6 @@ func (m SettingsModel) isVisible(f settingsField) bool {
 	if f == fieldModOutputName || f == fieldModlistPath {
 		return m.modOutputMode
 	}
-	if f == fieldCompressionBackend {
-		return runtime.GOOS != "darwin"
-	}
 	return true
 }
 
@@ -273,9 +270,8 @@ func (m SettingsModel) View() string {
 		b.WriteString(style.StyleMuted.Render("When on, profiles with generateMips=false skip mips entirely, dropping any chain the\n  source shipped. When off (default), a mipped source keeps its chain (flares, reticles).") + "\n\n")
 	}
 
-	// Compression backend selector — hidden on macOS since compressonator-bc7e
-	// isn't built for darwin.
-	if runtime.GOOS != "darwin" {
+	// Compression backend selector
+	{
 		label := "Compression Backend"
 		var value string
 		if m.compressionBackend == config.BackendCompressonatorBc7e {
