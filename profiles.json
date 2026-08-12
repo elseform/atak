@@ -123,7 +123,7 @@
         },
         {
             "name": "Normal Maps",
-            "format": "BC7_UNORM",
+            "format": "BC5_UNORM",
             "generateMips": true,
             "exclude": [
                 "*scope*bump*",
