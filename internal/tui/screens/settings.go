@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/noisethanks/atak/internal/config"
 	"github.com/noisethanks/atak/internal/tui/style"
 )
@@ -19,13 +19,13 @@ const (
 	fieldBackupDir
 	fieldWorkers
 	fieldBackupLevel
-	fieldStripMips          // bool toggle — no text input
-	fieldCompressionBackend // two-way selector
-	fieldModOutputMode      // bool toggle — no text input
-	fieldModOutputName      // text input, shown only when ModOutputMode is on
+	fieldStripMips            // bool toggle — no text input
+	fieldCompressionBackend   // two-way selector
+	fieldModOutputMode        // bool toggle — no text input
+	fieldModOutputName        // text input, shown only when ModOutputMode is on
 	fieldPerCategoryModOutput // bool toggle
-	fieldPerModModOutput    // bool toggle
-	fieldModlistPath        // text input, shown only when ModOutputMode is on
+	fieldPerModModOutput      // bool toggle
+	fieldModlistPath          // text input, shown only when ModOutputMode is on
 	fieldCount
 )
 
@@ -51,15 +51,15 @@ func inputIdx(f settingsField) int {
 
 // SettingsModel handles configuring user preferences.
 type SettingsModel struct {
-	cfg           *config.Config
-	inputs        [6]textinput.Model // modsDir, backupDir, workers, backupLevel, modOutputName, modlistPath
-	modOutputMode bool
+	cfg                  *config.Config
+	inputs               [6]textinput.Model // modsDir, backupDir, workers, backupLevel, modOutputName, modlistPath
+	modOutputMode        bool
 	perCategoryModOutput bool
-	perModModOutput bool
-	focused       settingsField
-	errMsg        string
-	width         int
-	height        int
+	perModModOutput      bool
+	focused              settingsField
+	errMsg               string
+	width                int
+	height               int
 	// stripMips mirrors cfg.StripMipsWhenDisabled while the toggle is being edited.
 	stripMips bool
 	// compressionBackend mirrors cfg.CompressionBackend while the selector is
@@ -99,14 +99,14 @@ func NewSettings(cfg *config.Config) SettingsModel {
 	}
 
 	return SettingsModel{
-		cfg:                cfg,
-		inputs:             [6]textinput.Model{mods, backup, workers, backupLvl, modOutputName, modlistPath},
-		modOutputMode:      cfg.ModOutputMode,
+		cfg:                  cfg,
+		inputs:               [6]textinput.Model{mods, backup, workers, backupLvl, modOutputName, modlistPath},
+		modOutputMode:        cfg.ModOutputMode,
 		perCategoryModOutput: cfg.PerCategoryModOutput,
-		perModModOutput:    cfg.PerModModOutput,
-		stripMips:          cfg.StripMipsWhenDisabled,
-		compressionBackend: backend,
-		focused:            fieldModsDir,
+		perModModOutput:      cfg.PerModModOutput,
+		stripMips:            cfg.StripMipsWhenDisabled,
+		compressionBackend:   backend,
+		focused:              fieldModsDir,
 	}
 }
 
@@ -239,15 +239,17 @@ func (m SettingsModel) save() (SettingsModel, tea.Cmd) {
 // duplicating the render logic. Kept in sync with the labels below by hand —
 // there's no field this doesn't cover, since every visible field has one.
 var settingsFieldLabel = map[settingsField]string{
-	fieldModsDir:            "Anomaly Mods Directory",
-	fieldBackupDir:          "Backup Directory",
-	fieldWorkers:            "Worker Threads",
-	fieldBackupLevel:        "Backup Compression Level",
-	fieldStripMips:          "Strip Mips When Disabled",
-	fieldCompressionBackend: "Compression Backend",
-	fieldModOutputMode:      "Mod Output Mode",
-	fieldModOutputName:      "Output Mod Name",
-	fieldModlistPath:        "MO2 modlist.txt Path",
+	fieldModsDir:              "Anomaly Mods Directory",
+	fieldBackupDir:            "Backup Directory",
+	fieldWorkers:              "Worker Threads",
+	fieldBackupLevel:          "Backup Compression Level",
+	fieldStripMips:            "Strip Mips When Disabled",
+	fieldCompressionBackend:   "Compression Backend",
+	fieldModOutputMode:        "Mod Output Mode",
+	fieldModOutputName:        "Output Mod Name",
+	fieldPerCategoryModOutput: "Per-Category Output Directories",
+	fieldPerModModOutput:      "Per-Mod Output Directories",
+	fieldModlistPath:          "MO2 modlist.txt Path",
 }
 
 // scrollToFocused windows body (already split into lines) around whichever

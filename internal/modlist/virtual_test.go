@@ -41,6 +41,39 @@ func TestBuildVirtualFSHighestPriorityWins(t *testing.T) {
 	}
 }
 
+// TestBuildVirtualFSAnchorsWrapperFolder covers a mod whose real content sits
+// under an extra top-level folder (e.g. an unflattened FOMOD variant folder,
+// mods/SomeMod/Hands/gamedata/...) instead of directly at the mod root. The
+// virtual path must be anchored to gamedata so it matches the true game path
+// — both for correct output structure and so it can merge/override against
+// another mod shipping the same file without the wrapper.
+func TestBuildVirtualFSAnchorsWrapperFolder(t *testing.T) {
+	modsDir := t.TempDir()
+
+	gameRel := filepath.Join("gamedata", "textures", "act", "act_glasses.dds")
+	wrapped := filepath.Join("Hands", gameRel)
+	writeModFile(t, modsDir, "WrappedMod", wrapped, "wrapped")
+
+	modList := []string{"WrappedMod"}
+
+	virtual, err := BuildVirtualFS(modsDir, modList)
+	if err != nil {
+		t.Fatalf("BuildVirtualFS: %v", err)
+	}
+
+	if _, ok := virtual[wrapped]; ok {
+		t.Fatalf("virtual FS keyed the wrapper folder in, want it stripped: %q", wrapped)
+	}
+	got, ok := virtual[gameRel]
+	if !ok {
+		t.Fatalf("virtual FS missing anchored path %q; keys: %v", gameRel, virtual)
+	}
+	want := filepath.Join(modsDir, "WrappedMod", wrapped)
+	if got != want {
+		t.Fatalf("wrong source for anchored path:\n got  %s\n want %s", got, want)
+	}
+}
+
 func writeModFile(t *testing.T, modsDir, mod, rel, content string) {
 	t.Helper()
 	full := filepath.Join(modsDir, mod, rel)

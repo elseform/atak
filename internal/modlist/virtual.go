@@ -28,10 +28,20 @@ func BuildVirtualFS(modsDir string, modList []string) (map[string]string, error)
 			if relErr != nil {
 				return nil
 			}
-			if strings.Count(filepath.ToSlash(rel), "gamedata") > 1 {
+			relSlash := filepath.ToSlash(rel)
+			if idx := strings.Index(relSlash, "gamedata/"); idx > 0 {
+				// Mod's real content sits under a wrapper folder (e.g. an
+				// unflattened FOMOD variant folder) rather than at the mod
+				// root — anchor to gamedata so this file's virtual path
+				// matches the true game path and merges/overrides correctly
+				// against other mods that ship the same file without the
+				// wrapper.
+				relSlash = relSlash[idx:]
+			}
+			if strings.Count(relSlash, "gamedata") > 1 {
 				return nil // variant folder (e.g. gamedata/Green/gamedata/...) — skip
 			}
-			virtual[rel] = path
+			virtual[filepath.FromSlash(relSlash)] = path
 			return nil
 		})
 		if err != nil {
