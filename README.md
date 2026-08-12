@@ -120,6 +120,57 @@ ATAK uses BCn block compression — a GPU-native format that decompresses in har
 
 ---
 
+## Headless candidate scan
+
+Use `atak scan` to export every uncompressed DDS found by ATAK's scanner without
+launching the TUI or modifying textures. It uses the GUI configuration and live
+`profiles.json` by default:
+
+```bash
+atak scan --output compression-candidates.csv
+```
+
+Override the scan root or profiles explicitly when working from a staging tree:
+
+```bash
+atak scan \
+  --mods-dir "/path/to/mods" \
+  --profiles "/path/to/profiles.json" \
+  --format csv \
+  --output compression-candidates.csv
+```
+
+Use `--format json` for JSON or `--output -` for stdout. Existing output files
+are never overwritten. CSV/JSON rows include matched candidates, unmatched
+textures, and explicit profile exclusions; already-compressed DDS files remain
+part of the skipped count printed to stderr.
+
+## Headless compression
+
+Preview the work, then execute it with the profiles and backend configured in
+the GUI:
+
+```bash
+atak compress --dry-run
+atak compress
+```
+
+By default, outputs are written beside the source mods as
+`[ATAK] <source mod name>`, with every texture's relative path preserved.
+Existing output textures are skipped on later runs, output mods are never
+cleaned, and existing `[ATAK]` output mods are excluded from scanning.
+
+Paths and execution settings can also be supplied explicitly:
+
+```bash
+atak compress \
+  --mods-dir "/path/to/mods" \
+  --profiles "/path/to/profiles.json" \
+  --output-root "/path/to/output/mods" \
+  --backend compressonator-bc7e \
+  --workers 4
+```
+
 ## Configuration
 
 Config lives at:

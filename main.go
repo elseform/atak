@@ -13,6 +13,26 @@ import (
 var version = "dev"
 
 func main() {
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "scan":
+			os.Exit(runScanCommand(os.Args[2:], os.Stdout, os.Stderr))
+		case "compress":
+			os.Exit(runCompressCommand(os.Args[2:], os.Stdout, os.Stderr))
+		case "help", "-h", "--help":
+			printRootUsage(os.Stdout)
+			return
+		default:
+			fmt.Fprintf(os.Stderr, "atak: unknown command %q\n", os.Args[1])
+			printRootUsage(os.Stderr)
+			os.Exit(2)
+		}
+	}
+
+	runTUI()
+}
+
+func runTUI() {
 	t, err := tools.Extract()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "atak: failed to extract embedded tools: %v\n", err)
