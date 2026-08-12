@@ -25,7 +25,8 @@
         "*/textures/ui/qaw_*",
         "*/textures/ui/sidhud/*",
         "*/textures/ui/ui_haruka_*",
-        "*/textures/ui/ui_magnifier2.*"
+        "*/textures/ui/ui_magnifier2.*",
+        "*/textures/ui/AlphaLion/*"
     ],
     "profiles": [
         {
