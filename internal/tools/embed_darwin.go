@@ -10,7 +10,7 @@ var texconvBin []byte
 //go:embed bin/7zz-macos
 var sevenZipBin []byte
 
-//go:embed bin/compressonator-bc7e-macos
+//go:embed bin/compressonator-bc7e-macos-arm64
 var compressonatorBin []byte
 
 const texconvName = "texconv"

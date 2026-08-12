@@ -25,20 +25,20 @@ internal/tools/bin/
 ├── texconv-macos                     # matyalatte macOS universal binary (Intel + Apple Silicon)
 ├── compressonator-bc7e-linux         # AMD Compressonator fork with bc7e.ispc BC7 encoder (Linux)
 ├── compressonator-bc7e-windows.exe   # same fork, Windows build
-├── compressonator-bc7e-macos         # same fork, natively compiled Apple Silicon (ARM64, neon-i32x4)
+├── compressonator-bc7e-macos-arm64         # same fork, natively compiled Apple Silicon (ARM64, neon-i32x4)
 ├── 7zz                               # 7-Zip standalone Linux binary
 ├── 7za.exe                           # 7-Zip standalone Windows binary
 └── 7zz-macos                         # 7-Zip standalone macOS universal binary (Intel + Apple Silicon)
 ```
 
 **macOS ships compressonator-bc7e as the default backend.** `embed_darwin.go`
-embeds the ARM64 `compressonator-bc7e-macos` binary; it is the default
+embeds the ARM64 `compressonator-bc7e-macos-arm64` binary; it is the default
 `CompressionBackend` on darwin (`config.defaultConfig` /
 `normalizeBackend`), with `texconv` available as a CPU fallback via the
 Settings toggle — same toggle as Linux/Windows.
 
 macOS `texconv`/`7zz` binaries are universal (Intel + Apple Silicon) — one
-binary covers all Mac hardware. `compressonator-bc7e-macos` is ARM64-only
+binary covers all Mac hardware. `compressonator-bc7e-macos-arm64` is ARM64-only
 (compiled via ISPC with `neon-i32x4`); no Intel Mac build exists yet.
 
 Each platform has its own `embed_<platform>.go` with `//go:build` tag and
@@ -60,7 +60,7 @@ On startup:
 4. `defer tools.Cleanup()` in main
 
 **Binary size:** adding compressonator-bc7e grows the Linux release binary the
-most (~9MB extra); Windows adds ~3.5MB. macOS now embeds compressonator-bc7e-macos
+most (~9MB extra); Windows adds ~3.5MB. macOS now embeds compressonator-bc7e-macos-arm64
 too (~3MB raw) — re-measure the stripped (`-s -w`) macOS release size before
 relying on the historical 25MB target; last recorded pre-bc7e figure was ~17MB.
 
@@ -358,14 +358,14 @@ atak/
 ├── profiles.json                        # repo-root copy of current default profile
 ├── bin/
 │   ├── texconv-linux / texconv-windows.exe / texconv-macos
-│   ├── compressonator-bc7e-linux / compressonator-bc7e-windows.exe / compressonator-bc7e-macos
+│   ├── compressonator-bc7e-linux / compressonator-bc7e-windows.exe / compressonator-bc7e-macos-arm64
 │   └── 7zz / 7zz.exe / 7zz-macos
 └── internal/
     ├── tools/
     │   ├── embed.go                     # EmbeddedTools struct, extraction, cleanup
     │   ├── embed_linux.go               # //go:embed bin/texconv-linux, bin/7zz, bin/compressonator-bc7e-linux
     │   ├── embed_windows.go             # //go:embed bin/texconv-windows.exe, bin/7zz.exe, bin/compressonator-bc7e-windows.exe
-    │   ├── embed_darwin.go              # //go:embed bin/texconv-macos, bin/7zz-macos, bin/compressonator-bc7e-macos
+    │   ├── embed_darwin.go              # //go:embed bin/texconv-macos, bin/7zz-macos, bin/compressonator-bc7e-macos-arm64
     │   ├── process_linux.go             # setProcAttr / killProcess — Linux/macOS
     │   ├── process_windows.go           # setProcAttr / killProcess — Windows Job Objects
     │   ├── lockfile.go                  # stale-process lockfile (Linux)
@@ -1230,7 +1230,7 @@ CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build \
   -ldflags="-s -w -X main.version=v0.1.0" \
   -o atak-windows.exe ./main.go
 
-# Release — macOS Intel (see Cross-Platform Rules re: compressonator-bc7e-macos
+# Release — macOS Intel (see Cross-Platform Rules re: compressonator-bc7e-macos-arm64
 # being ARM64-only — this target defaults to texconv)
 CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build \
   -ldflags="-s -w -X main.version=v0.1.0" \
@@ -1253,11 +1253,11 @@ builds without the flag, version displays as `dev`.
 - `windows/amd64` — supported, community-tested
 - `darwin/amd64` — "macOS (Intel)" in release notes. texconv/7zz are
   universal (Intel + Apple Silicon) so they work fine here;
-  compressonator-bc7e-macos is ARM64-only and is embedded but never
+  compressonator-bc7e-macos-arm64 is ARM64-only and is embedded but never
   selected by default on this target (see Cross-Platform Rules). Defaults
   to `"texconv"`.
 - `darwin/arm64` — "macOS (Apple Silicon)" in release notes. Native build,
-  uses the CPU-accelerated compressonator-bc7e-macos backend by default.
+  uses the CPU-accelerated compressonator-bc7e-macos-arm64 backend by default.
 
 The `-s -w` flags strip debug info. Final binaries should be under 25MB including
 all embedded tools. As of the compressonator-bc7e addition, stripped release
@@ -1283,14 +1283,14 @@ These must be followed in every file or platform support silently breaks:
 - **macOS process management:** Same as Linux — `syscall.SysProcAttr{Setpgid: true}`
   and `syscall.Kill(-pid, syscall.SIGKILL)` work on Darwin. `process_linux.go`
   build tag should be `//go:build linux || darwin`.
-- **compressonator-bc7e-macos is ARM64-only.** It's compiled natively via ISPC
+- **compressonator-bc7e-macos-arm64 is ARM64-only.** It's compiled natively via ISPC
   with `--target=neon-i32x4`; there is no Intel/amd64 build of the fork for
   darwin. `config.defaultConfig()` and `normalizeBackend()` therefore only
   default to `"compressonator-bc7e"` when `runtime.GOOS == "darwin" &&
   runtime.GOARCH == "arm64"` — on `darwin/amd64` the default stays
   `"texconv"`, same as Linux/Windows. **The goreleaser macOS build
   (`darwin/amd64`, labeled "macOS (Intel)") ships a Go binary that embeds
-  the ARM64 `compressonator-bc7e-macos` binary but never runs it by
+  the ARM64 `compressonator-bc7e-macos-arm64` binary but never runs it by
   default** — it's still baked in (harmless, unexecuted) since `embed_darwin.go`
   isn't GOARCH-gated. If goreleaser ever adds a `darwin/arm64` target, that
   build gets the working default; `darwin/amd64` users can still pick
