@@ -14,6 +14,14 @@ import (
 	"github.com/noisethanks/atak/internal/tui/style"
 )
 
+// sanitizeDirComponent replaces path separators in a string that's about to become
+// part of a directory name (a profile name from profiles.json, e.g. "Character /
+// Hands") — otherwise filepath.Join silently splits it into extra nested folders.
+func sanitizeDirComponent(s string) string {
+	s = strings.ReplaceAll(s, "/", "-")
+	return strings.ReplaceAll(s, `\`, "-")
+}
+
 // ScanResultData is passed from Scan → Results via NavigateMsg.
 type ScanResultData struct {
 	Assets       []scan.Asset
@@ -227,9 +235,9 @@ func (m ResultsModel) buildJobs(scope int, selectedProfile, selectedMod string) 
 				// unless StripMipsWhenDisabled makes generateMips:false authoritative.
 				genMips = append(genMips, compress.ShouldGenerateMips(profileMips, a.SourceMipCount, cfg.StripMipsWhenDisabled))
 				if cfg.ModOutputMode && cfg.ModOutputName != "" && cfg.PerModModOutput {
-					name := cfg.ModOutputName + " - " + a.ModName
+					name := cfg.ModOutputName + " - " + sanitizeDirComponent(a.ModName)
 					if cfg.PerCategoryModOutput {
-						name += " - " + g.ProfileName
+						name += " - " + sanitizeDirComponent(g.ProfileName)
 					}
 					dir := filepath.Join(cfg.ModsDir, name)
 					modOutputDirs = append(modOutputDirs, dir)
@@ -253,7 +261,7 @@ func (m ResultsModel) buildJobs(scope int, selectedProfile, selectedMod string) 
 				cg.ModOutputDirs = modOutputDirs
 			} else if cfg.ModOutputMode && cfg.ModOutputName != "" {
 				if cfg.PerCategoryModOutput {
-					cg.ModOutputDir = filepath.Join(cfg.ModsDir, cfg.ModOutputName+" - "+g.ProfileName)
+					cg.ModOutputDir = filepath.Join(cfg.ModsDir, cfg.ModOutputName+" - "+sanitizeDirComponent(g.ProfileName))
 				} else {
 					cg.ModOutputDir = filepath.Join(cfg.ModsDir, cfg.ModOutputName)
 				}
